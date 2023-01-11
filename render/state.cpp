@@ -215,10 +215,12 @@ void clean_and_exit(const char* file, int line, ...)
 
 #define VKTERMINATE(...) clean_and_exit(__FILE__, __LINE__, __VA_ARGS__)
 
-#define VK_CHECK(func, ...)     \
-  {                             \
-    if ((func) != VK_SUCCESS)   \
-    {                           \
-      VKTERMINATE(__VA_ARGS__); \
-    }                           \
+#define VK_CHECK(func, ...)                     \
+  {                                             \
+    VkResult fail_result;                       \
+    if ((fail_result = (func)) != VK_SUCCESS)   \
+    {                                           \
+      printf("result code: %d\n", fail_result); \
+      VKTERMINATE(__VA_ARGS__);                 \
+    }                                           \
   }

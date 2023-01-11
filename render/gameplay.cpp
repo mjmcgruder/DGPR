@@ -83,45 +83,8 @@ void game(list<entity>& scene_list, list<entity>& ui_list,
           vrtxgen_metadata& metadata, core_geometry& geom, real gamma,
           u64 time_step, uniform_set<scene_transform>& scene_ubo,
           u32 swap_chain_image_indx, graphics_pipeline& scene_pipeline,
-          graphics_pipeline& ui_pipeline, compute_pipeline& compute_test_func)
+          graphics_pipeline& ui_pipeline)
 {
-  // /* begin compute shader test */
-
-  // u32 h_len = 32;
-
-  // // host side buffer allocation
-  // array<float> h_a(h_len);
-  // array<float> h_b(h_len);
-  // array<float> h_c(h_len);
-  // 
-  // // initialization
-  // for (u32 i = 0; i < h_len; ++i)
-  // {
-  //   h_a[i] = (float)i;
-  //   h_b[i] = (float)i * (float)i;
-  // }
-
-  // // device side buffer allocation
-  // buffer_set<float> d_a(&compute_test_func.dset, 0);
-  // buffer_set<float> d_b(&compute_test_func.dset, 1);
-  // buffer_set<float> d_c(&compute_test_func.dset, 2);
-  // buffer_set<u32> d_len(&compute_test_func.dset, 3);
-
-  // // host to device send
-  // d_a.update(h_a.data, h_a.len);
-  // d_b.update(h_b.data, h_b.len);
-  // d_c.update(h_c.data, h_c.len);
-  // d_len.update(&h_len, 1);
-
-  // compute_test_func.run(((h_len + (256 - 1)) / 256), 1, 1);
-
-  // d_c.retrieve(h_c.data);
-
-  // for (u32 i = 0; i < h_len; ++i)
-  //   printf("%+.2f %+.2f : %+.2f\n", h_a[i], h_b[i], h_c[i]);
-
-  // /* end compute shader test */
-
   object_transform identity_transform;
   bool recompute = false;
   v3 pp(0., 0., 0.), pn(0., 0., 1.);

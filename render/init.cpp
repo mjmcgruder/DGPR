@@ -412,9 +412,9 @@ void vkinit(bool print_vkfeatures)
       device_create_info.ppEnabledLayerNames = validation_layers;
     }
 
-    VK_CHECK(vkCreateDevice(physical_device, &device_create_info, nullptr,
-                            &device) != VK_SUCCESS,
-             "logical device creation failed!");
+    VK_CHECK(
+    vkCreateDevice(physical_device, &device_create_info, nullptr, &device),
+    "logical device creation failed!");
 
     // get queue handles created with the logical device
     vkGetDeviceQueue(device, queue_family_indices.graphics, 0, &graphics_queue);

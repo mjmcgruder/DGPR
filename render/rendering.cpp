@@ -411,8 +411,6 @@ void render_loop(core_geometry& geom, u64 time_step, real gamma,
 
   make_swap_chain_dependencies(scene_pipeline, ui_pipeline);
 
-  compute_pipeline compute_test_func("compute_test.spv", 4);
-
   uniform_set<scene_transform> scene_ubo(&scene_pipeline.scene_layout);
 
   vrtxgen_metadata metadata;
@@ -492,7 +490,7 @@ void render_loop(core_geometry& geom, u64 time_step, real gamma,
     // do cpu-side work ------------------------------------------------------
 
     game(scene_list, ui_list, metadata, geom, gamma, time_step, scene_ubo,
-         swap_chain_image_indx, scene_pipeline, ui_pipeline, compute_test_func);
+         swap_chain_image_indx, scene_pipeline, ui_pipeline);
 
     if (print_prompt)
       write(STDOUT_FILENO, "$> ", 3);

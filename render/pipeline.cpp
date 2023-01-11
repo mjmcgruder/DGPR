@@ -466,7 +466,7 @@ descriptor_sets(num_swap_chain_images)
   /* make the descriptor pool */
 
   VkDescriptorPoolSize pool_size{};
-  pool_size.descriptorCount = num_swap_chain_images;
+  pool_size.descriptorCount = descriptor_sets.len * layout->layout_bindings.len;
   pool_size.type            = layout->layout_bindings[0].descriptorType;
 
   VkDescriptorPoolCreateInfo pool_info{};

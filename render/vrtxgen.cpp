@@ -285,10 +285,10 @@ void vrtxgen_metadata::compute_metadata_gpu(u32 N, core_geometry& geom)
 
   d_bf.retrieve(h_bf.data);
 
-  for (u64 i = 0; i < bfunc_precomp.len; ++i)
-  {
-    printf("%+.3e %+.3e\n", bfunc_precomp[i], h_bf[i]);
-  }
+  // for (u64 i = 0; i < bfunc_precomp.len; ++i)
+  // {
+  //   printf("%+.3e %+.3e\n", bfunc_precomp[i], h_bf[i]);
+  // }
 }
 
 void vrtxgen_metadata::compute_metadata_cpu(u64 N, output_type rend_var,
