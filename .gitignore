@@ -1,0 +1,11 @@
+# clangd
+.clangd
+.cache
+compile_commands.json
+
+# local dirs
+bin
+build
+
+# local build info
+local.mk
