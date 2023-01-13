@@ -22,6 +22,25 @@
 
 #include "data_structures.cpp"
 
+TEST(array_test, 1)
+{
+  array<u32, 4> foo({27, 8, 3, 64});
+
+  for (u64 i = 0; i < foo.len; ++i)
+    foo[i] = (u32)i;
+
+  array<u32, 4> bar({3, 64, 8, 27});
+
+  foo.shuffle({2, 3, 1, 0}, bar.data);
+
+  for (u64 w = 0; w < foo.dims[3]; ++w)
+    for (u64 z = 0; z < foo.dims[2]; ++z)
+      for (u64 y = 0; y < foo.dims[1]; ++y)
+        for (u64 x = 0; x < foo.dims[0]; ++x)
+          EXPECT_EQ(foo[27 * 8 * 3 * w + 27 * 8 * z + 27 * y + x],
+                    bar[3 * 64 * 8 * x + 3 * 64 * y + 3 * w + z]);
+}
+
 TEST(string_test, 1)
 {
   string bar;

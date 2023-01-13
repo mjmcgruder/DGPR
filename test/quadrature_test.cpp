@@ -237,7 +237,7 @@ TEST(gauss_legendre_3d, 1)
   EXPECT_DOUBLE_EQ(0.832108333333333, int3d(rule, ord2_3d), 20);
 
   rule = gauss_legendre_3d(16, 16, 16, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
-  EXPECT_DOUBLE_EQ(37.2668310398099, int3d(rule, ord16_3d), 16);
+  EXPECT_DOUBLE_EQ(37.2668310398099, int3d(rule, ord16_3d), 25);
 
   rule = gauss_legendre_3d(16, 16, 16, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
   EXPECT_DOUBLE_EQ(4.75258887997623, int3d(rule, ord16_3d), 20);

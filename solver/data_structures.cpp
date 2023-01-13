@@ -19,20 +19,24 @@
 #include <cstring>
 #include <utility>
 
+#include "error.cpp"
 #include "helper_types.cpp"
+#include "utils.cpp"
 
 /* array -------------------------------------------------------------------- */
 
-// note... you're using the zero initializing array new here
-// it's overly safe probably...
-template<typename T>
+template<typename T, u64 ndim = 1>
 struct array
 {
   u64 len;
+  u64 dims[ndim];
   T* data;
+
+  // --
 
   array();
   array(u64 len_);
+  array(std::initializer_list<u64>);
 
   array(const array& oth);
   array(array&& oth) noexcept;
@@ -42,38 +46,126 @@ struct array
 
   ~array();
 
+  // --
+
   T& operator[](u64 indx);
   const T& operator[](u64 indx) const;
-
   T* operator+(u64 num);
   T operator*();
-  T* operator&();
+
+  // --
+
+  void shuffle(std::initializer_list<size_t> permutation, T* output);
 };
 
-template<typename T>
-array<T>::array() : len(0), data(nullptr)
+template<typename T, u64 ndim>
+array<T, ndim>::array() : len(0), dims{}, data(nullptr)
 {}
 
-template<typename T>
-array<T>::array(u64 len_) : len(len_), data(new T[len]())
+template<typename T, u64 ndim>
+array<T, ndim>::array(u64 len_) : len(len_), dims{1}, data(new T[len]())
 {}
 
-template<typename T>
-array<T>::array(const array<T>& oth) : len(oth.len), data(new T[len]())
+template<typename T, u64 ndim>
+array<T, ndim>::array(std::initializer_list<u64> _dims)
+{
+  if (_dims.size() != ndim)
+    errout("attempted to initialize array with incorrect dimension count %d, "
+           "expected %d",
+           _dims.size(), ndim);
+
+  len    = 1;
+  u64 di = 0;
+
+  for (const u64& d : _dims)
+  {
+    dims[di] = d;
+    len *= dims[di];
+    ++di;
+  }
+
+  data = new T[len];
+}
+
+template<typename T, u64 ndim>
+void array<T, ndim>::shuffle(std::initializer_list<u64> permutation, T* output)
+{
+  if (permutation.size() != ndim)
+    errout("array permutation has incorrect dimension count %d, expected %d",
+           permutation.size(), ndim);
+
+  u64 permuted_dims[ndim];
+  {
+    u64 di = 0;
+    for (const u64& p : permutation)
+    {
+      permuted_dims[di] = dims[p];
+      ++di;
+    }
+  }
+
+  u64 indx_i[ndim] = {};
+  for (u64 i = 0; i < len; ++i)
+  {
+    /* shuffle data */
+
+    u64 indx_o[ndim];
+    {
+      u64 di = 0;
+      for (const u64& p : permutation)
+      {
+        indx_o[di] = indx_i[p];
+        ++di;
+      }
+    }
+
+    u64 lindx_i = linear_index(ndim, dims, indx_i);
+    u64 lindx_o = linear_index(ndim, permuted_dims, indx_o);
+
+    output[lindx_o] = data[lindx_i];
+
+    /* update index */
+
+    if (indx_i[0] == (dims[0] - 1))
+    {
+      for (u64 di = 1; di < ndim; ++di)
+      {
+        if (indx_i[di] != dims[di] - 1)
+        {
+          ++indx_i[di];
+          for (int dj = di - 1; dj > -1; --dj)
+          {
+            indx_i[dj] = 0;
+          }
+          break;
+        }
+      }
+    }
+    else
+    {
+      ++indx_i[0];
+    }
+  }
+}
+
+template<typename T, u64 ndim>
+array<T, ndim>::array(const array<T, ndim>& oth) :
+len(oth.len), data(new T[len]())
 {
   for (u64 i = 0; i < len; ++i)
     data[i] = oth.data[i];
 }
 
-template<typename T>
-array<T>::array(array<T>&& oth) noexcept : len(oth.len), data(oth.data)
+template<typename T, u64 ndim>
+array<T, ndim>::array(array<T, ndim>&& oth) noexcept :
+len(oth.len), data(oth.data)
 {
   oth.len  = 0;
   oth.data = nullptr;
 }
 
-template<typename T>
-array<T>& array<T>::operator=(const array<T>& oth)
+template<typename T, u64 ndim>
+array<T, ndim>& array<T, ndim>::operator=(const array<T, ndim>& oth)
 {
   delete[] data;
   len  = oth.len;
@@ -83,8 +175,8 @@ array<T>& array<T>::operator=(const array<T>& oth)
   return *this;
 }
 
-template<typename T>
-array<T>& array<T>::operator=(array<T>&& oth) noexcept
+template<typename T, u64 ndim>
+array<T, ndim>& array<T, ndim>::operator=(array<T, ndim>&& oth) noexcept
 {
   delete[] data;
   len      = oth.len;
@@ -94,40 +186,34 @@ array<T>& array<T>::operator=(array<T>&& oth) noexcept
   return *this;
 }
 
-template<typename T>
-array<T>::~array()
+template<typename T, u64 ndim>
+array<T, ndim>::~array()
 {
   delete[] data;
 }
 
-template<typename T>
-T& array<T>::operator[](u64 indx)
+template<typename T, u64 ndim>
+T& array<T, ndim>::operator[](u64 indx)
 {
   return data[indx];
 }
 
-template<typename T>
-const T& array<T>::operator[](u64 indx) const
+template<typename T, u64 ndim>
+const T& array<T, ndim>::operator[](u64 indx) const
 {
   return data[indx];
 }
 
-template<typename T>
-T* array<T>::operator+(u64 num)
+template<typename T, u64 ndim>
+T* array<T, ndim>::operator+(u64 num)
 {
   return data + num;
 }
 
-template<typename T>
-T array<T>::operator*()
+template<typename T, u64 ndim>
+T array<T, ndim>::operator*()
 {
   return *data;
-}
-
-template<typename T>
-T* array<T>::operator&()
-{
-  return data;
 }
 
 /* string ------------------------------------------------------------------- */
