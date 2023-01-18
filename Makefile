@@ -5,21 +5,21 @@ CUFLAGS  := -std=c++14 -Isolver -DSINGLE_PRECISION
 
 include local.mk
 
-shaders = graphics_vertex.glsl graphics_fragment.glsl compute_precomp_sol_basis.glsl compute_test.glsl
+shaders := graphics_vertex.spv graphics_fragment.spv compute_gemm.spv compute_precomp_basis.spv
 
 sol  := $(wildcard solver/*.cpp)
 cuda := $(wildcard solver/*.cu)
 tst  := $(wildcard test/*.cpp)
 rnd  := $(wildcard render/*.cpp)
-shdr := $(patsubst %,shaders/%,$(shaders))
 
 BIN  := bin
 
-DG   := $(BIN)/dg
-CUDG := $(BIN)/cudg
-TEST := $(BIN)/test
-REND := $(BIN)/rend
-SHDR := $(patsubst shaders/%.glsl,$(BIN)/%.spv,$(shdr))
+DG     := $(BIN)/dg
+CUDG   := $(BIN)/cudg
+TEST   := $(BIN)/test
+TESTVK := $(BIN)/testvk
+REND   := $(BIN)/rend
+SHDR   := $(patsubst %,$(BIN)/%,$(shaders))
 
 # ui
 
@@ -35,9 +35,12 @@ rend: $(REND)
 .PHONY : test
 test: $(TEST)
 
+.PHONY : testvk
+testvk: $(TESTVK)
+
 .PHONY : clean
 clean:
-	rm -f $(DG) $(CUDG) $(TEST) $(REND) $(SHDR)
+	rm -f $(DG) $(CUDG) $(TEST) $(TESTVK) $(REND) $(SHDR)
 
 # main targets
 
@@ -57,13 +60,17 @@ $(TEST): $(sol) $(tst)
 	@mkdir -p $(BIN)
 	$(CXX) $(CXXFLAGS) $(TEST_CXXFLAGS) -o$@ test/test.cpp $(TEST_LDFLAGS)
 
+$(TESTVK): $(sol) $(rnd) $(tst) $(SHDR) 
+	@mkdir -p $(BIN)
+	$(CXX) $(CXXFLAGS) $(TEST_CXXFLAGS) -DSINGLE_PRECISION -o$@ test/vkmath_test.cpp $(TEST_LDFLAGS) $(VULKAN_LDFLAGS)
+
 # shaders
 
 $(BIN)/graphics_vertex.spv: shaders/graphics_vertex.glsl
 	glslc -o$@ -fshader-stage=vert $^
 $(BIN)/graphics_fragment.spv: shaders/graphics_fragment.glsl
 	glslc -o$@ -fshader-stage=frag $^
-$(BIN)/compute_precomp_sol_basis.spv: shaders/compute_precomp_sol_basis.glsl
-	glslc -o$@ -fshader-stage=comp -Ishaders $^
-$(BIN)/compute_test.spv: shaders/compute_test.glsl
-	glslc -o$@ -fshader-stage=comp $^
+$(BIN)/compute_precomp_basis.spv: shaders/compute.glsl
+	glslc -o$@ -DBASIS -fshader-stage=comp $^
+$(BIN)/compute_gemm.spv: shaders/compute.glsl
+	glslc -o$@ -DGEMM -fshader-stage=comp $^

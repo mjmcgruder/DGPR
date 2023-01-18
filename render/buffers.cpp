@@ -326,7 +326,7 @@ void buffer_set<T>::update(T* input_data, u64 count, u64 swap_chain_image)
 
       void* data;
       vkMapMemory(device, memory[swap_chain_image], 0, buffer_size, 0, &data);
-      memcpy(data, &input_data, buffer_size);
+      memcpy(data, input_data, buffer_size);
       vkUnmapMemory(device, memory[swap_chain_image]);
     }
     break;

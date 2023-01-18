@@ -263,7 +263,7 @@ struct vrtxgen_metadata
 };
 
 vrtxgen_metadata::vrtxgen_metadata() :
-precomp_sol_basis("compute_precomp_sol_basis.spv", 3){}
+precomp_sol_basis("compute_precomp_basis.spv", 3){}
 
 void vrtxgen_metadata::compute_metadata_gpu(u32 N, core_geometry& geom)
 {
