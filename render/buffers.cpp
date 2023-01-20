@@ -274,6 +274,7 @@ buffer_set<T>::buffer_set(descriptor_set* _descset, u32 _binding,
 template<typename T>
 void buffer_set<T>::allocate(u64 count, u64 swap_chain_image)
 {
+  swap_chain_image = 0;
   VkDeviceSize buffer_size = count * sizeof(T);
 
   bool buffer_outdated = false;
@@ -329,6 +330,8 @@ void buffer_set<T>::allocate(u64 count, u64 swap_chain_image)
 template<typename T>
 void buffer_set<T>::send(T* input_data, u64 count, u64 swap_chain_image)
 {
+
+  swap_chain_image = 0;
   VkDeviceSize buffer_size = count * sizeof(*input_data);
 
   switch (memory_locale)
@@ -368,6 +371,8 @@ void buffer_set<T>::send(T* input_data, u64 count, u64 swap_chain_image)
 template<typename T>
 void buffer_set<T>::retrieve(T* output, u64 swap_chain_image)
 {
+
+  swap_chain_image = 0;
   u64 buffer_size = nelems[swap_chain_image] * sizeof(*output);
 
   VkBuffer staging_buffer              = VK_NULL_HANDLE;
@@ -392,6 +397,8 @@ void buffer_set<T>::retrieve(T* output, u64 swap_chain_image)
 template<typename T>
 void buffer_set<T>::update(T* input_data, u64 count, u64 swap_chain_image)
 {
+
+  swap_chain_image = 0;
   allocate(count, swap_chain_image);
   send(input_data, count, swap_chain_image);
 }
@@ -399,6 +406,8 @@ void buffer_set<T>::update(T* input_data, u64 count, u64 swap_chain_image)
 template<typename T>
 void buffer_set<T>::update_descriptor_set_reference(u32 swap_chain_image)
 {
+
+  swap_chain_image = 0;
   VkDeviceSize buffer_size = nelems[swap_chain_image] * sizeof(T);
 
   VkDescriptorBufferInfo buffer_info{};
@@ -424,6 +433,8 @@ void buffer_set<T>::update_descriptor_set_reference(u32 swap_chain_image)
 template<typename T>
 void buffer_set<T>::propagate_references(u64 swap_chain_image)
 {
+
+  swap_chain_image = 0;
   if (!up_to_date[swap_chain_image])
   {
     if (buffer[swap_chain_image] != VK_NULL_HANDLE)
@@ -447,6 +458,8 @@ void buffer_set<T>::propagate_references(u64 swap_chain_image)
 template<typename T>
 void buffer_set<T>::clear_buffer(u64 swap_chain_image)
 {
+
+  swap_chain_image = 0;
   VkBuffer current_buffer = buffer[swap_chain_image];
   vkDestroyBuffer(device, buffer[swap_chain_image], nullptr);
   vkFreeMemory(device, memory[swap_chain_image], nullptr);

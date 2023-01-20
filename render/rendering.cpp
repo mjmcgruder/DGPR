@@ -76,20 +76,20 @@ void make_command_buffers(uniform_set<scene_transform>& scene_ubo,
     entity& obj = i.val();
 
     vkCmdBindVertexBuffers(*command_buffer, 0, 1,
-                           &obj.vertices.buffer[swap_chain_image], offsets);
+                           &obj.vertices.buffer[0], offsets);
 
-    vkCmdBindIndexBuffer(*command_buffer, obj.indices.buffer[swap_chain_image],
+    vkCmdBindIndexBuffer(*command_buffer, obj.indices.buffer[0],
                          0, VK_INDEX_TYPE_UINT32);
 
     vkCmdBindDescriptorSets(
     *command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene_pipeline.layout, 0,
-    1, &scene_ubo.dset.descriptor_sets[swap_chain_image], 0, nullptr);
+    1, &scene_ubo.dset.descriptor_sets[0], 0, nullptr);
 
     vkCmdBindDescriptorSets(
     *command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene_pipeline.layout, 1,
-    1, &obj.ubo.dset.descriptor_sets[swap_chain_image], 0, nullptr);
+    1, &obj.ubo.dset.descriptor_sets[0], 0, nullptr);
 
-    vkCmdDrawIndexed(*command_buffer, (u32)obj.indices.nelems[swap_chain_image],
+    vkCmdDrawIndexed(*command_buffer, (u32)obj.indices.nelems[0],
                      1, 0, 0, 0);
   }
 
@@ -117,20 +117,20 @@ void make_command_buffers(uniform_set<scene_transform>& scene_ubo,
     entity& obj = i.val();
 
     vkCmdBindVertexBuffers(*command_buffer, 0, 1,
-                           &obj.vertices.buffer[swap_chain_image], offsets);
+                           &obj.vertices.buffer[0], offsets);
 
-    vkCmdBindIndexBuffer(*command_buffer, obj.indices.buffer[swap_chain_image],
+    vkCmdBindIndexBuffer(*command_buffer, obj.indices.buffer[0],
                          0, VK_INDEX_TYPE_UINT32);
 
     vkCmdBindDescriptorSets(
     *command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ui_pipeline.layout, 0, 1,
-    &scene_ubo.dset.descriptor_sets[swap_chain_image], 0, nullptr);
+    &scene_ubo.dset.descriptor_sets[0], 0, nullptr);
 
     vkCmdBindDescriptorSets(
     *command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ui_pipeline.layout, 1,
-    1, &obj.ubo.dset.descriptor_sets[swap_chain_image], 0, nullptr);
+    1, &obj.ubo.dset.descriptor_sets[0], 0, nullptr);
 
-    vkCmdDrawIndexed(*command_buffer, (u32)obj.indices.nelems[swap_chain_image],
+    vkCmdDrawIndexed(*command_buffer, (u32)obj.indices.nelems[0],
                      1, 0, 0, 0);
   }
 
