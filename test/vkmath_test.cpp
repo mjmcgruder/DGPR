@@ -63,10 +63,16 @@ void run_vkgpu_test(u32 m, u32 k, u32 n)
                                     // seems like this issue stems from malloc
                                     // and copy being the same operation
 
+  double cpu_start = MPI_Wtime();
   matmul(m, k, n, 1.f, A.data, B.data, 0.f, Ccpu.data);
+  double cpu_end = MPI_Wtime();
 
+  double gpu_start = MPI_Wtime();
   vkmatmul.run((n + (TILE_SIZE - 1)) / TILE_SIZE,
                (m + (TILE_SIZE - 1)) / TILE_SIZE, 1);
+  double gpu_end = MPI_Wtime();
+
+  printf("cpu: %.5fs gpu: %.5fs\n", cpu_end - cpu_start, gpu_end - gpu_start);
 
   d_C.retrieve(Cgpu.data);
 
@@ -91,6 +97,9 @@ TEST(vkmath_test_matmul, 1)
     run_vkgpu_test(150, 128, 128);  // tall and skinny C, inner dim divs evenly
     run_vkgpu_test(128, 175, 150);  // short and fat C, inner dim divs unevenly
     run_vkgpu_test(150, 175, 128);  // tall n skinny C, inner dim divs unevenly
+
+    run_vkgpu_test(1024, 1024, 1024);  // largeish, divs evenly
+    run_vkgpu_test(2000, 4000, 1500);  // largeish, divs unevenly
   }
 
   clean();

@@ -245,6 +245,8 @@ struct buffer_set
   void clear_buffer(u64 swap_chain_image);
   void clear();
 
+  void allocate(u64 count, u64 swap_chain_image = 0);
+  void send(T* input_data, u64 count, u64 swap_chain_image = 0);
   void update(T* input_data, u64 count, u64 swap_chain_image = 0);
   void retrieve(T* output, u64 swap_chain_image = 0);
 
@@ -270,15 +272,15 @@ buffer_set<T>::buffer_set(descriptor_set* _descset, u32 _binding,
 }
 
 template<typename T>
-void buffer_set<T>::update(T* input_data, u64 count, u64 swap_chain_image)
+void buffer_set<T>::allocate(u64 count, u64 swap_chain_image)
 {
-  VkDeviceSize buffer_size = count * sizeof(*input_data);
+  VkDeviceSize buffer_size = count * sizeof(T);
 
   bool buffer_outdated = false;
   if (count != nelems[swap_chain_image])
     buffer_outdated = true;
 
-  switch (memory_locale)
+  switch(memory_locale)
   {
     case memloc_device: 
     {
@@ -293,7 +295,46 @@ void buffer_set<T>::update(T* input_data, u64 count, u64 swap_chain_image)
                     memory[swap_chain_image]);
         nelems[swap_chain_image] = count;
       }
+    }
+      break;
+    break;
+    case memloc_host: 
+    {
+      if (buffer_outdated)
+      {
+        clear_buffer(swap_chain_image);
 
+        make_buffer(buffer_size, usage_flags, property_flags[memory_locale],
+                    buffer[swap_chain_image], memory[swap_chain_image]);
+        nelems[swap_chain_image] = count;
+      }
+    }
+    break;
+  }
+
+  if (descset && buffer_outdated)
+  {
+    update_descriptor_set_reference(swap_chain_image);
+  }
+
+  last_updated_image = swap_chain_image;
+  if (buffer_outdated)
+  {
+    for (u64 i = 0; i < num_swap_chain_images; ++i)
+      up_to_date[i] = false;
+  }
+  up_to_date[swap_chain_image] = true;
+}
+
+template<typename T>
+void buffer_set<T>::send(T* input_data, u64 count, u64 swap_chain_image)
+{
+  VkDeviceSize buffer_size = count * sizeof(*input_data);
+
+  switch (memory_locale)
+  {
+    case memloc_device: 
+    {
       VkBuffer staging_buffer              = VK_NULL_HANDLE;
       VkDeviceMemory staging_buffer_memory = VK_NULL_HANDLE;
 
@@ -315,15 +356,6 @@ void buffer_set<T>::update(T* input_data, u64 count, u64 swap_chain_image)
     break;
     case memloc_host: 
     {
-      if (buffer_outdated)
-      {
-        clear_buffer(swap_chain_image);
-
-        make_buffer(buffer_size, usage_flags, property_flags[memory_locale],
-                    buffer[swap_chain_image], memory[swap_chain_image]);
-        nelems[swap_chain_image] = count;
-      }
-
       void* data;
       vkMapMemory(device, memory[swap_chain_image], 0, buffer_size, 0, &data);
       memcpy(data, input_data, buffer_size);
@@ -331,19 +363,6 @@ void buffer_set<T>::update(T* input_data, u64 count, u64 swap_chain_image)
     }
     break;
   }
-
-  if (descset)
-  {
-    update_descriptor_set_reference(swap_chain_image);
-  }
-
-  last_updated_image = swap_chain_image;
-  if (buffer_outdated)
-  {
-    for (u64 i = 0; i < num_swap_chain_images; ++i)
-      up_to_date[i] = false;
-  }
-  up_to_date[swap_chain_image] = true;
 }
 
 template<typename T>
@@ -368,6 +387,13 @@ void buffer_set<T>::retrieve(T* output, u64 swap_chain_image)
 
   vkDestroyBuffer(device, staging_buffer, nullptr);
   vkFreeMemory(device, staging_buffer_memory, nullptr);
+}
+
+template<typename T>
+void buffer_set<T>::update(T* input_data, u64 count, u64 swap_chain_image)
+{
+  allocate(count, swap_chain_image);
+  send(input_data, count, swap_chain_image);
 }
 
 template<typename T>

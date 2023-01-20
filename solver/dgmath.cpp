@@ -110,18 +110,13 @@ void matmul(u64 n, u64 m, u64 p, real alpha, real* A, real* B, real beta,
     for (icol = 0; icol < p; ++icol)
     {
       indC = p * irow + icol;
-      // ensure proper handling of uninitialized data
-      real tst = C[indC] * 0.;  // ensure Inf values are converted to NaN
-      if (tst != tst)           // test for NaN
-      {
-        C[indC] = 0.;
-      }
-      // continue with actual work
+      real tmp = 0.;
       C[indC] *= beta;
       for (iacc = 0; iacc < m; ++iacc)
       {
-        C[indC] += alpha * A[m * irow + iacc] * B[iacc * p + icol];
+        tmp += alpha * A[m * irow + iacc] * B[iacc * p + icol];
       }
+      C[indC] += tmp;
     }
   }
 }
