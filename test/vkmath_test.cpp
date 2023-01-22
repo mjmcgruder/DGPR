@@ -47,12 +47,12 @@ void run_vkgpu_test(u32 m, u32 k, u32 n)
     Cgpu[i] = 0.f;
   }
 
-  buffer_set<u32> d_m(&vkmatmul.dset, 0);
-  buffer_set<u32> d_k(&vkmatmul.dset, 1);
-  buffer_set<u32> d_n(&vkmatmul.dset, 2);
-  buffer_set<float> d_A(&vkmatmul.dset, 3);
-  buffer_set<float> d_B(&vkmatmul.dset, 4);
-  buffer_set<float> d_C(&vkmatmul.dset, 5);
+  dbuffer<u32> d_m(&vkmatmul.dset, 0);
+  dbuffer<u32> d_k(&vkmatmul.dset, 1);
+  dbuffer<u32> d_n(&vkmatmul.dset, 2);
+  dbuffer<float> d_A(&vkmatmul.dset, 3);
+  dbuffer<float> d_B(&vkmatmul.dset, 4);
+  dbuffer<float> d_C(&vkmatmul.dset, 5);
 
   d_m.update(&m, 1);
   d_k.update(&k, 1);
@@ -86,21 +86,17 @@ TEST(vkmath_test_matmul, 1)
 {
   vkinit(false);
 
-  {
-    graphics_pipeline scene_pipeline;
-    graphics_pipeline ui_pipeline;
-    make_swap_chain_dependencies(scene_pipeline, ui_pipeline);
+  make_swap_chain();
 
-    run_vkgpu_test(128, 128, 128);  // square, tile divides evenly
-    run_vkgpu_test(100, 100, 100);  // square, tile divides unevenly
-    run_vkgpu_test(128, 128, 150);  // short and fat C, inner dim divs evenly
-    run_vkgpu_test(150, 128, 128);  // tall and skinny C, inner dim divs evenly
-    run_vkgpu_test(128, 175, 150);  // short and fat C, inner dim divs unevenly
-    run_vkgpu_test(150, 175, 128);  // tall n skinny C, inner dim divs unevenly
+  run_vkgpu_test(128, 128, 128);  // square, tile divides evenly
+  run_vkgpu_test(100, 100, 100);  // square, tile divides unevenly
+  run_vkgpu_test(128, 128, 150);  // short and fat C, inner dim divs evenly
+  run_vkgpu_test(150, 128, 128);  // tall and skinny C, inner dim divs evenly
+  run_vkgpu_test(128, 175, 150);  // short and fat C, inner dim divs unevenly
+  run_vkgpu_test(150, 175, 128);  // tall n skinny C, inner dim divs unevenly
 
-    run_vkgpu_test(1024, 1024, 1024);  // largeish, divs evenly
-    run_vkgpu_test(2000, 4000, 1500);  // largeish, divs unevenly
-  }
+  run_vkgpu_test(1024, 1024, 1024);  // largeish, divs evenly
+  run_vkgpu_test(2000, 4000, 1500);  // largeish, divs unevenly
 
   clean();
 }

@@ -437,8 +437,8 @@ struct descriptor_set
 {
   descriptor_set_layout* layout;
 
-  VkDescriptorPool descriptor_pool;
-  array<VkDescriptorSet> descriptor_sets;
+  VkDescriptorPool dpool;
+  VkDescriptorSet dset;
 
   // --
 
@@ -459,72 +459,67 @@ struct descriptor_set
 };
 
 descriptor_set::descriptor_set(descriptor_set_layout* _layout) :
-layout(_layout),
-descriptor_pool(VK_NULL_HANDLE),
-descriptor_sets(num_swap_chain_images)
+layout(_layout), dpool(VK_NULL_HANDLE), dset(VK_NULL_HANDLE)
 {
   /* make the descriptor pool */
 
   VkDescriptorPoolSize pool_size{};
-  pool_size.descriptorCount = descriptor_sets.len * layout->layout_bindings.len;
+  pool_size.descriptorCount = layout->layout_bindings.len;
   pool_size.type            = layout->layout_bindings[0].descriptorType;
 
   VkDescriptorPoolCreateInfo pool_info{};
   pool_info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
   pool_info.poolSizeCount = 1;
   pool_info.pPoolSizes    = &pool_size;
-  pool_info.maxSets       = num_swap_chain_images;
+  pool_info.maxSets       = 1;
 
-  VK_CHECK(
-  vkCreateDescriptorPool(device, &pool_info, nullptr, &descriptor_pool),
-  "descriptor pool creation failed!");
+  VK_CHECK(vkCreateDescriptorPool(device, &pool_info, nullptr, &dpool),
+           "descriptor pool creation failed!");
 
   /* allocte the descriptor sets */
 
-  array<VkDescriptorSetLayout> layouts(num_swap_chain_images);
-  for (u64 ib = 0; ib < num_swap_chain_images; ++ib)
-    layouts[ib] = layout->layout;
-
   VkDescriptorSetAllocateInfo alloc_info{};
   alloc_info.sType          = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-  alloc_info.descriptorPool = descriptor_pool;
-  alloc_info.descriptorSetCount = layouts.len;
-  alloc_info.pSetLayouts        = layouts.data;
+  alloc_info.descriptorPool = dpool;
+  alloc_info.descriptorSetCount = 1;
+  alloc_info.pSetLayouts        = &(layout->layout);
 
-  VK_CHECK(vkAllocateDescriptorSets(device, &alloc_info, &descriptor_sets[0]),
+  VK_CHECK(vkAllocateDescriptorSets(device, &alloc_info, &dset),
            "descriptor set allocation failed!");
 }
 
 descriptor_set::descriptor_set() :
 layout(nullptr),
-descriptor_pool(VK_NULL_HANDLE),
-descriptor_sets{}
+dpool(VK_NULL_HANDLE),
+dset(VK_NULL_HANDLE)
 {}
 
 void descriptor_set::clean()
 {
-  vkDestroyDescriptorPool(device, descriptor_pool, nullptr);
+  vkDestroyDescriptorPool(device, dpool, nullptr);
 }
 
 descriptor_set::descriptor_set(descriptor_set&& oth) noexcept :
 layout(std::move(oth.layout)),
-descriptor_pool(std::move(oth.descriptor_pool)),
-descriptor_sets(std::move(oth.descriptor_sets))
+dpool(std::move(oth.dpool)),
+dset(std::move(oth.dset))
 {
-  oth.layout          = nullptr;
-  oth.descriptor_pool = VK_NULL_HANDLE;
+  oth.layout = nullptr;
+  oth.dpool  = VK_NULL_HANDLE;
+  oth.dset   = VK_NULL_HANDLE;
 }
 
 descriptor_set& descriptor_set::operator=(descriptor_set&& oth) noexcept
 {
   clean();
 
-  layout          = std::move(oth.layout);
-  descriptor_pool = std::move(oth.descriptor_pool);
-  descriptor_sets = std::move(oth.descriptor_sets);
+  layout = std::move(oth.layout);
+  dpool  = std::move(oth.dpool);
+  dset   = std::move(oth.dset);
 
-  oth.layout          = VK_NULL_HANDLE;
-  oth.descriptor_pool = VK_NULL_HANDLE;
+  oth.layout = VK_NULL_HANDLE;
+  oth.dpool  = VK_NULL_HANDLE;
+  oth.dset   = VK_NULL_HANDLE;
 
   return *this;
 }
@@ -739,8 +734,7 @@ void compute_pipeline::run(u32 gcx, u32 gcy, u32 gcz, u32 swap_chain_image)
   vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
 
   vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                          pipeline_layout, 0, 1,
-                          &dset.descriptor_sets[swap_chain_image], 0, nullptr);
+                          pipeline_layout, 0, 1, &dset.dset, 0, nullptr);
 
   vkCmdDispatch(command_buffer, gcx, gcy, gcz);
 

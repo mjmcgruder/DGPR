@@ -81,9 +81,8 @@ void move_object(glm::mat4& model, const scene_transform& scene)
 
 void game(list<entity>& scene_list, list<entity>& ui_list,
           vrtxgen_metadata& metadata, core_geometry& geom, real gamma,
-          u64 time_step, uniform_set<scene_transform>& scene_ubo,
-          u32 swap_chain_image_indx, graphics_pipeline& scene_pipeline,
-          graphics_pipeline& ui_pipeline)
+          u64 time_step, uniform<scene_transform>& scene_ubo,
+          graphics_pipeline& scene_pipeline, graphics_pipeline& ui_pipeline)
 {
   object_transform identity_transform;
   bool recompute = false;
@@ -136,7 +135,7 @@ void game(list<entity>& scene_list, list<entity>& ui_list,
       for (u64 r = 0; r < 3; ++r)
         axis->ubo.host_data.model[c][r] = model_rotation[c][r];
 
-    axis->ubo.map_to(swap_chain_image_indx);
+    axis->ubo.map();
   }
 
   // add / remove from scene ---------------------------------------------
@@ -147,9 +146,9 @@ void game(list<entity>& scene_list, list<entity>& ui_list,
   {
     if (entity* elems = scene_list.get_strict("elems"))
     {
-      generate_elem_surface_vertices(*elems, swap_chain_image_indx, geom,
-                                     *render_state, resolution, render_output,
-                                     metadata, gamma, global_colormap);
+      generate_elem_surface_vertices(*elems, geom, *render_state, resolution,
+                                     render_output, metadata, gamma,
+                                     global_colormap);
     }
   }
 
@@ -159,9 +158,9 @@ void game(list<entity>& scene_list, list<entity>& ui_list,
     entity& elems =
     scene_list.add("elems", entity(&scene_pipeline.object_layout));
 
-    generate_elem_surface_vertices(elems, swap_chain_image_indx, geom,
-                                   *render_state, resolution, render_output,
-                                   metadata, gamma, global_colormap);
+    generate_elem_surface_vertices(elems, geom, *render_state, resolution,
+                                   render_output, metadata, gamma,
+                                   global_colormap);
   }
   else if (elems_check != nullptr && !elem_display_toggle_on)
   {
@@ -170,9 +169,7 @@ void game(list<entity>& scene_list, list<entity>& ui_list,
 
   if (entity* elems = scene_list.get_strict("elems"))
   {
-    elems->ubo.map_to(swap_chain_image_indx);
-    elems->vertices.propagate_references(swap_chain_image_indx);
-    elems->indices.propagate_references(swap_chain_image_indx);
+    elems->ubo.map();
   }
 
   // preview plane
@@ -192,8 +189,8 @@ void game(list<entity>& scene_list, list<entity>& ui_list,
     entity& preview =
     scene_list.add("preview", entity(&scene_pipeline.object_layout));
 
-    preview.update_geometry(swap_chain_image_indx, slice_preview_vertices, 4,
-                            slice_preview_indices, 6);
+    preview.update_geometry(slice_preview_vertices, 4, slice_preview_indices,
+                            6);
   }
   else if (preview_check != nullptr && !preview_display_toggle_on)
   {
@@ -212,9 +209,7 @@ void game(list<entity>& scene_list, list<entity>& ui_list,
     pp = v3(pp_glm[0], pp_glm[1], pp_glm[2]);
     pn = v3(pn_glm[0], pn_glm[1], pn_glm[2]);
 
-    preview->ubo.map_to(swap_chain_image_indx);
-    preview->vertices.propagate_references(swap_chain_image_indx);
-    preview->indices.propagate_references(swap_chain_image_indx);
+    preview->ubo.map();
   }
 
   // slice
@@ -223,9 +218,8 @@ void game(list<entity>& scene_list, list<entity>& ui_list,
   {
     if (entity* slice = scene_list.get_strict("slice"))
     {
-      generate_slice_vertices(*slice, swap_chain_image_indx, geom,
-                              *render_state, resolution, pp, pn, render_output,
-                              metadata, gamma, global_colormap);
+      generate_slice_vertices(*slice, geom, *render_state, resolution, pp, pn,
+                              render_output, metadata, gamma, global_colormap);
     }
   }
 
@@ -236,9 +230,8 @@ void game(list<entity>& scene_list, list<entity>& ui_list,
     "slice",
     entity(&scene_pipeline.object_layout));
 
-    generate_slice_vertices(slice, swap_chain_image_indx, geom, *render_state,
-                            resolution, pp, pn, render_output, metadata, gamma,
-                            global_colormap);
+    generate_slice_vertices(slice, geom, *render_state, resolution, pp, pn,
+                            render_output, metadata, gamma, global_colormap);
   }
   else if (slice_check != nullptr && !slice_display_toggle_on)
   {
@@ -248,16 +241,14 @@ void game(list<entity>& scene_list, list<entity>& ui_list,
 
   if (entity* slice = scene_list.get_strict("slice"))
   {
-    slice->ubo.map_to(swap_chain_image_indx);
-    slice->vertices.propagate_references(swap_chain_image_indx);
-    slice->indices.propagate_references(swap_chain_image_indx);
+    slice->ubo.map();
     scene_ubo.host_data.slicing = glm::bvec4(true);
   }
 
   mouse_dx = 0.;
   mouse_dy = 0.;
 
-  scene_ubo.map_to(swap_chain_image_indx);
+  scene_ubo.map();
 
   // non-rendering tasks -------------------------------------------------------
 

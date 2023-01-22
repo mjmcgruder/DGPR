@@ -18,6 +18,7 @@
 
 #include <cstring>
 #include <utility>
+#include <initializer_list>
 
 #include "error.cpp"
 #include "helper_types.cpp"
@@ -55,7 +56,7 @@ struct array
 
   // --
 
-  void shuffle(std::initializer_list<size_t> permutation, T* output);
+  void shuffle(std::initializer_list<u64> permutation, T* output);
 };
 
 template<typename T, u64 ndim>

@@ -433,7 +433,7 @@ void vkinit(bool print_vkfeatures)
   {
     VkCommandPoolCreateInfo pool_info{};
     pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    pool_info.flags = 0;
+    pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
     pool_info.queueFamilyIndex = queue_family_indices.graphics;
     VK_CHECK(

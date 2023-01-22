@@ -193,12 +193,12 @@ void copy_buffer(VkBuffer src_buffer, VkBuffer dst_buffer, VkDeviceSize size)
   vkFreeCommandBuffers(device, transfer_command_pool, 1, &command_buffer);
 }
 
-/* ---------- */
-/* buffer_set --------------------------------------------------------------- */
-/* ---------- */
+/* ------- */
+/* dbuffer ------------------------------------------------------------------ */
+/* ------- */
 
 template<typename T>
-struct buffer_set
+struct dbuffer
 {
   enum memory_residency : u32
   {
@@ -212,9 +212,9 @@ struct buffer_set
 
   // ---
 
-  array<VkBuffer> buffer;
-  array<VkDeviceMemory> memory;
-  array<u32> nelems;
+  VkBuffer buffer;
+  VkDeviceMemory memory;
+  u32 nelems;
 
   descriptor_set* descset;
   u32 binding;
@@ -222,92 +222,77 @@ struct buffer_set
   VkBufferUsageFlags usage_flags;
   memory_residency memory_locale;
 
-  u64 last_updated_image;
-  array<bool> up_to_date;
-
   // ---
 
-  buffer_set();
-  buffer_set(descriptor_set* _descset, u32 _binding,
+  dbuffer();
+  dbuffer(descriptor_set* _descset, u32 _binding,
              VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
              memory_residency locale  = memloc_device);
 
-  buffer_set(buffer_set& oth)            = delete;
-  buffer_set& operator=(buffer_set& oth) = delete;
+  dbuffer(dbuffer& oth)            = delete;
+  dbuffer& operator=(dbuffer& oth) = delete;
 
-  buffer_set(buffer_set&& oth) noexcept;
-  buffer_set& operator=(buffer_set&& oth) noexcept;
+  dbuffer(dbuffer&& oth) noexcept;
+  dbuffer& operator=(dbuffer&& oth) noexcept;
 
-  ~buffer_set();
+  ~dbuffer();
 
   // ---
 
-  void clear_buffer(u64 swap_chain_image);
+  void allocate(u64 count);
+  void send(T* input_data, u64 count);
+  void retrieve(T* output);
+  void update(T* input_data, u64 count);
+
   void clear();
-
-  void allocate(u64 count, u64 swap_chain_image = 0);
-  void send(T* input_data, u64 count, u64 swap_chain_image = 0);
-  void update(T* input_data, u64 count, u64 swap_chain_image = 0);
-  void retrieve(T* output, u64 swap_chain_image = 0);
-
-  void update_descriptor_set_reference(u32 swap_chain_image);
-  void propagate_references(u64 swap_chain_image);
 };
 
 template<typename T>
-buffer_set<T>::buffer_set(descriptor_set* _descset, u32 _binding,
+dbuffer<T>::dbuffer(descriptor_set* _descset, u32 _binding,
                           VkBufferUsageFlags usage, memory_residency locale)
 {
-  buffer     = array<VkBuffer>(num_swap_chain_images);
-  memory     = array<VkDeviceMemory>(num_swap_chain_images);
-  nelems     = array<u32>(num_swap_chain_images);
-  up_to_date = array<bool>(num_swap_chain_images);
-  descset    = _descset;
-  binding    = _binding;
+  buffer  = VK_NULL_HANDLE;
+  memory  = VK_NULL_HANDLE;
+  nelems  = 0;
+  descset = _descset;
+  binding = _binding;
 
   usage_flags   = usage;
   memory_locale = locale;
-
-  last_updated_image = 0;
 }
 
 template<typename T>
-void buffer_set<T>::allocate(u64 count, u64 swap_chain_image)
+void dbuffer<T>::allocate(u64 count)
 {
-  swap_chain_image = 0;
   VkDeviceSize buffer_size = count * sizeof(T);
 
   bool buffer_outdated = false;
-  if (count != nelems[swap_chain_image])
+  if (count != nelems)
     buffer_outdated = true;
 
-  switch(memory_locale)
+  switch (memory_locale)
   {
-    case memloc_device: 
-    {
+    case memloc_device: {
       if (buffer_outdated)
       {
-        clear_buffer(swap_chain_image);
+        clear();
 
         make_buffer(buffer_size,
                     VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                     VK_BUFFER_USAGE_TRANSFER_SRC_BIT | usage_flags,
-                    property_flags[memory_locale], buffer[swap_chain_image],
-                    memory[swap_chain_image]);
-        nelems[swap_chain_image] = count;
+                    property_flags[memory_locale], buffer, memory);
+        nelems = count;
       }
     }
-      break;
     break;
-    case memloc_host: 
-    {
+    case memloc_host: {
       if (buffer_outdated)
       {
-        clear_buffer(swap_chain_image);
+        clear();
 
         make_buffer(buffer_size, usage_flags, property_flags[memory_locale],
-                    buffer[swap_chain_image], memory[swap_chain_image]);
-        nelems[swap_chain_image] = count;
+                    buffer, memory);
+        nelems = count;
       }
     }
     break;
@@ -315,29 +300,35 @@ void buffer_set<T>::allocate(u64 count, u64 swap_chain_image)
 
   if (descset && buffer_outdated)
   {
-    update_descriptor_set_reference(swap_chain_image);
-  }
+    VkDescriptorBufferInfo buffer_info{};
+    buffer_info.buffer = buffer;
+    buffer_info.offset = 0;
+    buffer_info.range  = buffer_size;
 
-  last_updated_image = swap_chain_image;
-  if (buffer_outdated)
-  {
-    for (u64 i = 0; i < num_swap_chain_images; ++i)
-      up_to_date[i] = false;
+    VkWriteDescriptorSet descriptor_write{};
+    descriptor_write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptor_write.dstSet          = descset->dset;
+    descriptor_write.dstBinding      = binding;
+    descriptor_write.dstArrayElement = 0;
+    descriptor_write.descriptorType =
+    descset->layout->layout_bindings[binding].descriptorType;
+    descriptor_write.descriptorCount  = 1;
+    descriptor_write.pBufferInfo      = &buffer_info;
+    descriptor_write.pImageInfo       = nullptr;
+    descriptor_write.pTexelBufferView = nullptr;
+
+    vkUpdateDescriptorSets(device, 1, &descriptor_write, 0, nullptr);
   }
-  up_to_date[swap_chain_image] = true;
 }
 
 template<typename T>
-void buffer_set<T>::send(T* input_data, u64 count, u64 swap_chain_image)
+void dbuffer<T>::send(T* input_data, u64 count)
 {
-
-  swap_chain_image = 0;
   VkDeviceSize buffer_size = count * sizeof(*input_data);
 
   switch (memory_locale)
   {
-    case memloc_device: 
-    {
+    case memloc_device: {
       VkBuffer staging_buffer              = VK_NULL_HANDLE;
       VkDeviceMemory staging_buffer_memory = VK_NULL_HANDLE;
 
@@ -351,29 +342,26 @@ void buffer_set<T>::send(T* input_data, u64 count, u64 swap_chain_image)
       memcpy(data, input_data, (size_t)buffer_size);
       vkUnmapMemory(device, staging_buffer_memory);
 
-      copy_buffer(staging_buffer, buffer[swap_chain_image], buffer_size);
+      copy_buffer(staging_buffer, buffer, buffer_size);
 
       vkDestroyBuffer(device, staging_buffer, nullptr);
       vkFreeMemory(device, staging_buffer_memory, nullptr);
     }
     break;
-    case memloc_host: 
-    {
+    case memloc_host: {
       void* data;
-      vkMapMemory(device, memory[swap_chain_image], 0, buffer_size, 0, &data);
+      vkMapMemory(device, memory, 0, buffer_size, 0, &data);
       memcpy(data, input_data, buffer_size);
-      vkUnmapMemory(device, memory[swap_chain_image]);
+      vkUnmapMemory(device, memory);
     }
     break;
   }
 }
 
 template<typename T>
-void buffer_set<T>::retrieve(T* output, u64 swap_chain_image)
+void dbuffer<T>::retrieve(T* output)
 {
-
-  swap_chain_image = 0;
-  u64 buffer_size = nelems[swap_chain_image] * sizeof(*output);
+  u64 buffer_size = nelems * sizeof(*output);
 
   VkBuffer staging_buffer              = VK_NULL_HANDLE;
   VkDeviceMemory staging_buffer_memory = VK_NULL_HANDLE;
@@ -383,7 +371,7 @@ void buffer_set<T>::retrieve(T* output, u64 swap_chain_image)
   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
   staging_buffer, staging_buffer_memory);
 
-  copy_buffer(buffer[swap_chain_image], staging_buffer, buffer_size);
+  copy_buffer(buffer, staging_buffer, buffer_size);
 
   void* data;
   vkMapMemory(device, staging_buffer_memory, 0, buffer_size, 0, &data);
@@ -395,205 +383,130 @@ void buffer_set<T>::retrieve(T* output, u64 swap_chain_image)
 }
 
 template<typename T>
-void buffer_set<T>::update(T* input_data, u64 count, u64 swap_chain_image)
+void dbuffer<T>::update(T* input_data, u64 count)
 {
-
-  swap_chain_image = 0;
-  allocate(count, swap_chain_image);
-  send(input_data, count, swap_chain_image);
+  allocate(count);
+  send(input_data, count);
 }
 
 template<typename T>
-void buffer_set<T>::update_descriptor_set_reference(u32 swap_chain_image)
+void dbuffer<T>::clear()
 {
-
-  swap_chain_image = 0;
-  VkDeviceSize buffer_size = nelems[swap_chain_image] * sizeof(T);
-
-  VkDescriptorBufferInfo buffer_info{};
-  buffer_info.buffer = buffer[swap_chain_image];
-  buffer_info.offset = 0;
-  buffer_info.range  = buffer_size;
-
-  VkWriteDescriptorSet descriptor_write{};
-  descriptor_write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  descriptor_write.dstSet          = descset->descriptor_sets[swap_chain_image];
-  descriptor_write.dstBinding      = binding;
-  descriptor_write.dstArrayElement = 0;
-  descriptor_write.descriptorType =
-  descset->layout->layout_bindings[binding].descriptorType;
-  descriptor_write.descriptorCount  = 1;
-  descriptor_write.pBufferInfo      = &buffer_info;
-  descriptor_write.pImageInfo       = nullptr;
-  descriptor_write.pTexelBufferView = nullptr;
-
-  vkUpdateDescriptorSets(device, 1, &descriptor_write, 0, nullptr);
+  vkDestroyBuffer(device, buffer, nullptr);
+  vkFreeMemory(device, memory, nullptr);
 }
 
 template<typename T>
-void buffer_set<T>::propagate_references(u64 swap_chain_image)
-{
-
-  swap_chain_image = 0;
-  if (!up_to_date[swap_chain_image])
-  {
-    if (buffer[swap_chain_image] != VK_NULL_HANDLE)
-    {
-      clear_buffer(swap_chain_image);
-    }
-
-    buffer[swap_chain_image] = buffer[last_updated_image];
-    memory[swap_chain_image] = memory[last_updated_image];
-    nelems[swap_chain_image] = nelems[last_updated_image];
-
-    if (descset)
-    {
-      update_descriptor_set_reference(swap_chain_image);
-    }
-
-    up_to_date[swap_chain_image] = true;
-  }
-}
-
-template<typename T>
-void buffer_set<T>::clear_buffer(u64 swap_chain_image)
-{
-
-  swap_chain_image = 0;
-  VkBuffer current_buffer = buffer[swap_chain_image];
-  vkDestroyBuffer(device, buffer[swap_chain_image], nullptr);
-  vkFreeMemory(device, memory[swap_chain_image], nullptr);
-  for (u64 i = 0; i < buffer.len; ++i)
-  {
-    if (buffer[i] == current_buffer)
-    {
-      buffer[i] = VK_NULL_HANDLE;
-      memory[i] = VK_NULL_HANDLE;
-    }
-  }
-}
-
-template<typename T>
-void buffer_set<T>::clear()
-{
-  for (u64 i = 0; i < buffer.len; ++i)
-    clear_buffer(i);
-}
-
-template<typename T>
-buffer_set<T>::~buffer_set()
+dbuffer<T>::~dbuffer()
 {
   clear();
 }
 
 template<typename T>
-buffer_set<T>::buffer_set() :
-buffer{},
-memory{},
-nelems{},
+dbuffer<T>::dbuffer() :
+buffer(VK_NULL_HANDLE),
+memory(VK_NULL_HANDLE),
+nelems(0),
 descset(nullptr),
 binding(0),
 usage_flags(0),
-memory_locale(memloc_device),
-last_updated_image(0),
-up_to_date()
+memory_locale(memloc_device)
 {}
 
 template<typename T>
-buffer_set<T>::buffer_set(buffer_set&& oth) noexcept :
+dbuffer<T>::dbuffer(dbuffer&& oth) noexcept :
 buffer(std::move(oth.buffer)),
 memory(std::move(oth.memory)),
 nelems(std::move(oth.nelems)),
-descset(oth.descset),
-binding(oth.binding),
-usage_flags(oth.usage_flags),
-memory_locale(oth.memory_locale),
-last_updated_image(oth.last_updated_image),
-up_to_date(std::move(oth.up_to_date))
+descset(std::move(oth.descset)),
+binding(std::move(oth.binding)),
+usage_flags(std::move(oth.usage_flags)),
+memory_locale(std::move(oth.memory_locale))
 {
-  oth.descset            = nullptr;
-  oth.binding            = 0;
-  oth.usage_flags        = 0;
-  oth.memory_locale      = memloc_device;
-  oth.last_updated_image = 0;
+  oth.buffer        = VK_NULL_HANDLE;
+  oth.memory        = VK_NULL_HANDLE;
+  oth.nelems        = 0;
+  oth.descset       = nullptr;
+  oth.binding       = 0;
+  oth.usage_flags   = 0;
+  oth.memory_locale = memloc_device;
 }
 
 template<typename T>
-buffer_set<T>& buffer_set<T>::operator=(buffer_set&& oth) noexcept
+dbuffer<T>& dbuffer<T>::operator=(dbuffer&& oth) noexcept
 {
   clear();
 
   buffer             = std::move(oth.buffer);
   memory             = std::move(oth.memory);
   nelems             = std::move(oth.nelems);
-  descset            = oth.descset;
-  binding            = oth.binding;
-  usage_flags        = oth.usage_flags;
-  memory_locale      = oth.memory_locale;
-  last_updated_image = oth.last_updated_image;
-  up_to_date         = std::move(oth.up_to_date);
+  descset            = std::move(oth.descset);
+  binding            = std::move(oth.binding);
+  usage_flags        = std::move(oth.usage_flags);
+  memory_locale      = std::move(oth.memory_locale);
 
-  oth.descset            = nullptr;
-  oth.binding            = 0;
-  oth.usage_flags        = 0;
-  oth.memory_locale      = memloc_device;
-  oth.last_updated_image = 0;
+  oth.buffer        = VK_NULL_HANDLE;
+  oth.memory        = VK_NULL_HANDLE;
+  oth.nelems        = 0;
+  oth.descset       = nullptr;
+  oth.binding       = 0;
+  oth.usage_flags   = 0;
+  oth.memory_locale = memloc_device;
 
   return *this;
 }
 
-/* ----------- */
-/* uniform set -------------------------------------------------------------- */
-/* ----------- */
+/* ------- */
+/* uniform ------------------------------------------------------------------ */
+/* ------- */
 
 template<typename T>
-struct uniform_set
+struct uniform
 {
   T host_data;
 
   descriptor_set dset;
-  buffer_set<T> buffers;
+  dbuffer<T> buffers;
 
   // --
 
-  uniform_set();
+  uniform();
 
-  uniform_set(uniform_set& oth) = delete;
-  uniform_set& operator=(uniform_set& oth) = delete;
+  uniform(uniform& oth) = delete;
+  uniform& operator=(uniform& oth) = delete;
 
-  uniform_set(uniform_set&& oth) noexcept;
-  uniform_set& operator=(uniform_set&& oth) noexcept;
+  uniform(uniform&& oth) noexcept;
+  uniform& operator=(uniform&& oth) noexcept;
 
-  uniform_set(descriptor_set_layout* dset_layout);
+  uniform(descriptor_set_layout* dset_layout);
 
   // --
 
-  void map_to(u32 swap_chain_image);
+  void map();
 };
 
 template<typename T>
-uniform_set<T>::uniform_set(descriptor_set_layout* dset_layout) :
+uniform<T>::uniform(descriptor_set_layout* dset_layout) :
 host_data{},
 dset{dset_layout},
-buffers(&dset, 0, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        buffer_set<T>::memloc_device)
+buffers(&dset, 0, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, dbuffer<T>::memloc_device)
 {}
 
 template<typename T>
-void uniform_set<T>::map_to(u32 image)
+void uniform<T>::map()
 {
-  buffers.update(&host_data, 1, image);
+  buffers.update(&host_data, 1);
 }
 
 template<typename T>
-uniform_set<T>::uniform_set() :
+uniform<T>::uniform() :
 host_data{},
 dset{},
 buffers{}
 {}
 
 template<typename T>
-uniform_set<T>::uniform_set(uniform_set&& oth) noexcept :
+uniform<T>::uniform(uniform&& oth) noexcept :
 host_data(std::move(oth.host_data)),
 dset(std::move(oth.dset)), 
 buffers(std::move(oth.buffers))
@@ -602,7 +515,7 @@ buffers(std::move(oth.buffers))
 }
 
 template<typename T>
-uniform_set<T>& uniform_set<T>::operator=(uniform_set&& oth) noexcept
+uniform<T>& uniform<T>::operator=(uniform&& oth) noexcept
 {
   host_data = std::move(oth.host_data);
   dset      = std::move(oth.dset);
@@ -619,9 +532,9 @@ uniform_set<T>& uniform_set<T>::operator=(uniform_set&& oth) noexcept
 
 struct entity
 {
-  buffer_set<vertex> vertices;
-  buffer_set<u32> indices;
-  uniform_set<object_transform> ubo;
+  dbuffer<vertex> vertices;
+  dbuffer<u32> indices;
+  uniform<object_transform> ubo;
 
   descriptor_set vertex_dset;
   descriptor_set index_dset;
@@ -642,9 +555,9 @@ struct entity
 
   // ---
 
-  void update_uniform(u64 swap_chain_image);
-  void update_geometry(u64 swap_chain_image, vertex* vertex_data,
-                       u64 vertex_len, u32* index_data, u64 index_len);
+  void update_uniform();
+  void update_geometry(vertex* vertex_data, u64 vertex_len, u32* index_data,
+                       u64 index_len);
 };
 
 entity::entity() : vertices{}, indices{}, ubo{}, vertex_dset{}, index_dset{}
@@ -700,27 +613,27 @@ entity::entity(descriptor_set_layout* uniform_layout,
     pindex_dset = &index_dset;
   }
 
-  vertices = buffer_set<vertex>(
+  vertices = dbuffer<vertex>(
   pvertex_dset, 0,
   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-  buffer_set<vertex>::memloc_device);
+  dbuffer<vertex>::memloc_device);
 
-  indices = buffer_set<u32>(
+  indices = dbuffer<u32>(
   pindex_dset, 0,
   VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-  buffer_set<u32>::memloc_device);
+  dbuffer<u32>::memloc_device);
 
-  ubo = uniform_set<object_transform>{uniform_layout};
+  ubo = uniform<object_transform>{uniform_layout};
 }
 
-void entity::update_uniform(u64 swap_chain_image)
+void entity::update_uniform()
 {
-  ubo.map_to(swap_chain_image);
+  ubo.map();
 }
 
-void entity::update_geometry(u64 swap_chain_image, vertex* vertex_data,
-                             u64 vertex_len, u32* index_data, u64 index_len)
+void entity::update_geometry(vertex* vertex_data, u64 vertex_len,
+                             u32* index_data, u64 index_len)
 {
-  vertices.update(vertex_data, vertex_len, swap_chain_image);
-  indices.update(index_data, index_len, swap_chain_image);
+  vertices.update(vertex_data, vertex_len);
+  indices.update(index_data, index_len);
 }

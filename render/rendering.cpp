@@ -26,26 +26,17 @@
 #include "pipeline.cpp"
 #include "gameplay.cpp"
 
-void make_command_buffers(uniform_set<scene_transform>& scene_ubo,
-                          list<entity>& scene_list, list<entity>& ui_list,
-                          graphics_pipeline& scene_pipeline,
-                          graphics_pipeline& ui_pipeline, u32 swap_chain_image,
-                          VkCommandBuffer* command_buffer)
+void record_command_buffer(uniform<scene_transform>& scene_ubo,
+                           list<entity>& scene_list, list<entity>& ui_list,
+                           graphics_pipeline& scene_pipeline,
+                           graphics_pipeline& ui_pipeline, u32 swap_chain_image,
+                           VkCommandBuffer* command_buffer)
 {
   const u32 nclear_values = 2;
   VkClearValue clear_values[nclear_values]{};
   clear_values[0].color        = {{0.0f, 0.0f, 0.0f, 1.0f}};
   clear_values[1].depthStencil = {1.0f, 0};
   VkDeviceSize offsets[]       = {0};
-
-  // command buffer allocation
-  VkCommandBufferAllocateInfo alloc_info{};
-  alloc_info.sType       = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  alloc_info.commandPool = graphics_command_pool;
-  alloc_info.level       = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  alloc_info.commandBufferCount = (uint32_t)1;
-  VK_CHECK(vkAllocateCommandBuffers(device, &alloc_info, command_buffer),
-           "command buffer creation failed!");
 
   VkCommandBufferBeginInfo begin_info{};
   begin_info.sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -75,22 +66,21 @@ void make_command_buffers(uniform_set<scene_transform>& scene_ubo,
   {
     entity& obj = i.val();
 
-    vkCmdBindVertexBuffers(*command_buffer, 0, 1,
-                           &obj.vertices.buffer[0], offsets);
+    vkCmdBindVertexBuffers(*command_buffer, 0, 1, &obj.vertices.buffer,
+                           offsets);
 
-    vkCmdBindIndexBuffer(*command_buffer, obj.indices.buffer[0],
-                         0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindIndexBuffer(*command_buffer, obj.indices.buffer, 0,
+                         VK_INDEX_TYPE_UINT32);
 
-    vkCmdBindDescriptorSets(
-    *command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene_pipeline.layout, 0,
-    1, &scene_ubo.dset.descriptor_sets[0], 0, nullptr);
+    vkCmdBindDescriptorSets(*command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            scene_pipeline.layout, 0, 1, &scene_ubo.dset.dset,
+                            0, nullptr);
 
-    vkCmdBindDescriptorSets(
-    *command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene_pipeline.layout, 1,
-    1, &obj.ubo.dset.descriptor_sets[0], 0, nullptr);
+    vkCmdBindDescriptorSets(*command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            scene_pipeline.layout, 1, 1, &obj.ubo.dset.dset, 0,
+                            nullptr);
 
-    vkCmdDrawIndexed(*command_buffer, (u32)obj.indices.nelems[0],
-                     1, 0, 0, 0);
+    vkCmdDrawIndexed(*command_buffer, (u32)obj.indices.nelems, 1, 0, 0, 0);
   }
 
   vkCmdEndRenderPass(*command_buffer);
@@ -116,22 +106,21 @@ void make_command_buffers(uniform_set<scene_transform>& scene_ubo,
   {
     entity& obj = i.val();
 
-    vkCmdBindVertexBuffers(*command_buffer, 0, 1,
-                           &obj.vertices.buffer[0], offsets);
+    vkCmdBindVertexBuffers(*command_buffer, 0, 1, &obj.vertices.buffer,
+                           offsets);
 
-    vkCmdBindIndexBuffer(*command_buffer, obj.indices.buffer[0],
-                         0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindIndexBuffer(*command_buffer, obj.indices.buffer, 0,
+                         VK_INDEX_TYPE_UINT32);
 
-    vkCmdBindDescriptorSets(
-    *command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ui_pipeline.layout, 0, 1,
-    &scene_ubo.dset.descriptor_sets[0], 0, nullptr);
+    vkCmdBindDescriptorSets(*command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            ui_pipeline.layout, 0, 1, &scene_ubo.dset.dset, 0,
+                            nullptr);
 
-    vkCmdBindDescriptorSets(
-    *command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ui_pipeline.layout, 1,
-    1, &obj.ubo.dset.descriptor_sets[0], 0, nullptr);
+    vkCmdBindDescriptorSets(*command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            ui_pipeline.layout, 1, 1, &obj.ubo.dset.dset, 0,
+                            nullptr);
 
-    vkCmdDrawIndexed(*command_buffer, (u32)obj.indices.nelems[0],
-                     1, 0, 0, 0);
+    vkCmdDrawIndexed(*command_buffer, (u32)obj.indices.nelems, 1, 0, 0, 0);
   }
 
   vkCmdEndRenderPass(*command_buffer);
@@ -349,51 +338,6 @@ void remake_swap_chain(graphics_pipeline& scene_pipeline,
   make_swap_chain_dependencies(scene_pipeline, ui_pipeline);
 }
 
-struct syncobj {
-  VkSemaphore* image_available_semaphores;
-  VkSemaphore* render_finished_semaphores;
-  VkFence* in_flight_fences;
-  VkFence* images_in_flight;
-
-  syncobj();
-  ~syncobj();
-};
-
-syncobj::syncobj() :
-image_available_semaphores(new VkSemaphore[MAX_FRAMES_IN_FLIGHT]),
-render_finished_semaphores(new VkSemaphore[MAX_FRAMES_IN_FLIGHT]),
-in_flight_fences(new VkFence[MAX_FRAMES_IN_FLIGHT]),
-images_in_flight(new VkFence[num_swap_chain_images]) {
-  for (u32 i = 0; i < num_swap_chain_images; ++i) {
-    images_in_flight[i] = VK_NULL_HANDLE;
-  }
-
-  VkSemaphoreCreateInfo semaphore_info{};
-  semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-  VkFenceCreateInfo fence_info{};
-  fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-  fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
-  for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-    if (vkCreateSemaphore(device, &semaphore_info, nullptr,
-                          &image_available_semaphores[i]) != VK_SUCCESS ||
-        vkCreateSemaphore(device, &semaphore_info, nullptr,
-                          &render_finished_semaphores[i]) != VK_SUCCESS ||
-        vkCreateFence(device, &fence_info, nullptr, &in_flight_fences[i]) !=
-        VK_SUCCESS) {
-      VKTERMINATE("creation of frame syncronization objects failed!");
-    }
-  }
-}
-
-syncobj::~syncobj() {
-  delete[] image_available_semaphores;
-  delete[] render_finished_semaphores;
-  delete[] in_flight_fences;
-  delete[] images_in_flight;
-}
-
 void render_loop(core_geometry& geom, u64 time_step, real gamma,
                  bool print_vkfeatures)
 {
@@ -411,13 +355,11 @@ void render_loop(core_geometry& geom, u64 time_step, real gamma,
 
   make_swap_chain_dependencies(scene_pipeline, ui_pipeline);
 
-  uniform_set<scene_transform> scene_ubo(&scene_pipeline.scene_layout);
+  uniform<scene_transform> scene_ubo(&scene_pipeline.scene_layout);
 
   vrtxgen_metadata metadata;
 
   render_state = rendering_outputs.get_strict("state");
-
-  write(STDOUT_FILENO, "$> ", 3);
 
   {
     vertex vertices[] = {
@@ -428,135 +370,134 @@ void render_loop(core_geometry& geom, u64 time_step, real gamma,
     };
     u32 indices[] = {0, 2, 1, 1, 2, 3, 0, 3, 2, 0, 1, 3};
 
-    entity& axis  = ui_list.add("axis", entity(&ui_pipeline.object_layout));
-    for (u64 i = 0; i < num_swap_chain_images; ++i)
-      axis.update_geometry(i, vertices, 4, indices, 12);
+    entity& axis = ui_list.add("axis", entity(&ui_pipeline.object_layout));
+    axis.update_geometry(vertices, 4, indices, 12);
   }
+
+  /*
+   * render synchronization objects --------------------------------------------
+   */
+
+  VkCommandBuffer command_buffer        = VK_NULL_HANDLE;
+  VkFence render_in_progress            = VK_NULL_HANDLE;
+  VkSemaphore image_available_semaphore = VK_NULL_HANDLE;
+  VkSemaphore render_finished_semaphore = VK_NULL_HANDLE;
+
+  VkFenceCreateInfo fence_info{};
+  fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+  fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+  VK_CHECK(vkCreateFence(device, &fence_info, nullptr, &render_in_progress),
+           "render fence creation failed!");
+
+  VkSemaphoreCreateInfo semaphore_info{};
+  semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+  VK_CHECK(vkCreateSemaphore(device, &semaphore_info, nullptr,
+                             &image_available_semaphore),
+           "image available semaphore creation failed!");
+  VK_CHECK(vkCreateSemaphore(device, &semaphore_info, nullptr,
+                             &render_finished_semaphore),
+           "render finished semaphone creatino failed!");
+
+  VkCommandBufferAllocateInfo alloc_info{};
+  alloc_info.sType       = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  alloc_info.commandPool = graphics_command_pool;
+  alloc_info.level       = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  alloc_info.commandBufferCount = (uint32_t)1;
+  VK_CHECK(vkAllocateCommandBuffers(device, &alloc_info, &command_buffer),
+           "render command buffer creation failed!");
 
   /*
    * render loop -------------------------------------------------------------
    */
 
-  syncobj sync;
   VkPipelineStageFlags wait_stages[] = {
   VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
 
-  VkCommandBuffer* command_buffers = new VkCommandBuffer[num_swap_chain_images];
-  for (int i = 0; i < num_swap_chain_images; ++i)
-    command_buffers[i] = VK_NULL_HANDLE;
-
-  u64 frame_in_flight = 0;
+  write(STDOUT_FILENO, "$> ", 3);
   while (!glfwWindowShouldClose(window))
   {
-    VkResult result;
     u32 swap_chain_image_indx;
 
     // process input
+
     glfwPollEvents();
-    bool print_prompt = cli();
+    if (cli()) write(STDOUT_FILENO, "$> ", 3);
 
-    // ensure only the specified number of frames is in flight
-    vkWaitForFences(device, 1, &sync.in_flight_fences[frame_in_flight], VK_TRUE,
-                    UINT64_MAX);
+    // check for window resize
 
-    // determine the swap chain image number (re-size swap chain if necessary)
-    result =
-    vkAcquireNextImageKHR(device, swap_chain, UINT64_MAX,
-                          sync.image_available_semaphores[frame_in_flight],
-                          VK_NULL_HANDLE, &swap_chain_image_indx);
+    VkSurfaceCapabilitiesKHR surface_capabilities;
+    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface,
+                                                       &surface_capabilities),
+             "failed to acquire surfce capabilies to check for resizing!");
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR)
+    if (surface_capabilities.currentExtent.width != swap_chain_extent.width ||
+        surface_capabilities.currentExtent.height != swap_chain_extent.height)
     {
       remake_swap_chain(scene_pipeline, ui_pipeline);
       continue;
     }
-    else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
-    {
-      VKTERMINATE("failed to acquire swap chain image!");
-    }
 
-    if (sync.images_in_flight[swap_chain_image_indx] != VK_NULL_HANDLE)
-    {
-      vkWaitForFences(device, 1, &sync.images_in_flight[swap_chain_image_indx],
-                      VK_TRUE, UINT64_MAX);
-    }
-
-    // waiting's all done, reset this fence
-    vkResetFences(device, 1, &sync.in_flight_fences[frame_in_flight]);
-
-    sync.images_in_flight[swap_chain_image_indx] =
-    sync.in_flight_fences[frame_in_flight];
-
-    // do cpu-side work ------------------------------------------------------
+    // generate geometry
 
     game(scene_list, ui_list, metadata, geom, gamma, time_step, scene_ubo,
-         swap_chain_image_indx, scene_pipeline, ui_pipeline);
+         scene_pipeline, ui_pipeline);
 
-    if (print_prompt)
-      write(STDOUT_FILENO, "$> ", 3);
+    // reset / determine frame assets
 
-    // record command buffers ------------------------------------------------
+    vkResetFences(device, 1, &render_in_progress);
+    vkResetCommandBuffer(command_buffer, 0);
 
-    if (command_buffers[swap_chain_image_indx] != VK_NULL_HANDLE)
-    {
-      vkFreeCommandBuffers(device, graphics_command_pool, (uint32_t)1,
-                           &command_buffers[swap_chain_image_indx]);
-    }
+    VK_CHECK_SUBOPTIMAL(
+    vkAcquireNextImageKHR(device, swap_chain, UINT64_MAX,
+                          image_available_semaphore, VK_NULL_HANDLE,
+                          &swap_chain_image_indx),
+    "failed to determine the swap chain image for this frame!");
 
-    make_command_buffers(scene_ubo, scene_list, ui_list, scene_pipeline,
-                         ui_pipeline, swap_chain_image_indx,
-                         &command_buffers[swap_chain_image_indx]);
+    // record render command buffer
 
-    // command buffer submission ---------------------------------------------
+    record_command_buffer(scene_ubo, scene_list, ui_list, scene_pipeline,
+                          ui_pipeline, swap_chain_image_indx, &command_buffer);
+
+    // submit command buffer
 
     VkSubmitInfo si{};
     si.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.waitSemaphoreCount   = 1;
-    si.pWaitSemaphores      = &sync.image_available_semaphores[frame_in_flight];
+    si.pWaitSemaphores      = &image_available_semaphore;
     si.pWaitDstStageMask    = wait_stages;
     si.commandBufferCount   = 1;
-    si.pCommandBuffers      = &command_buffers[swap_chain_image_indx];
+    si.pCommandBuffers      = &command_buffer;
     si.signalSemaphoreCount = 1;
-    si.pSignalSemaphores    = &sync.render_finished_semaphores[frame_in_flight];
-    VK_CHECK(vkQueueSubmit(graphics_queue, 1, &si,
-                           sync.in_flight_fences[frame_in_flight]),
+    si.pSignalSemaphores    = &render_finished_semaphore;
+    VK_CHECK(vkQueueSubmit(graphics_queue, 1, &si, render_in_progress),
              "submission to draw command buffer failed!");
 
-    // presentation ----------------------------------------------------------
+    // present
 
     VkPresentInfoKHR pi{};
     pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.waitSemaphoreCount = 1;
-    pi.pWaitSemaphores    = &sync.render_finished_semaphores[frame_in_flight];
+    pi.pWaitSemaphores    = &render_finished_semaphore;
     pi.swapchainCount     = 1;
     pi.pSwapchains        = &swap_chain;
     pi.pImageIndices      = &swap_chain_image_indx;
     pi.pResults           = nullptr;
-    result                = vkQueuePresentKHR(present_queue, &pi);
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR ||
-        frame_buffer_resized)
-    {
-      frame_buffer_resized = false;
-      remake_swap_chain(scene_pipeline, ui_pipeline);
-    }
-    else if (result != VK_SUCCESS)
-    {
-      VKTERMINATE("failed to present swap chain image!");
-    }
+    VK_CHECK_SUBOPTIMAL(vkQueuePresentKHR(present_queue, &pi),
+                        "presentation failed!");
 
-    // frame count to keep track of multiple frames in flight
-    frame_in_flight = (frame_in_flight + 1) % MAX_FRAMES_IN_FLIGHT;
+    // ensure rendering is finished before continuing to the next frame
+    //   (this is essential in this program because you might be re-generating
+    //   geometry every frame you can't afford to use several times the memory
+    //   for large entities to avoid data races with the cpu and gpu are out
+    //   of sync)
+    vkWaitForFences(device, 1, &render_in_progress, VK_TRUE, UINT64_MAX);
   }
 
   vkDeviceWaitIdle(device);
 
-  for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
-  {
-    vkDestroySemaphore(device, sync.render_finished_semaphores[i], nullptr);
-    vkDestroySemaphore(device, sync.image_available_semaphores[i], nullptr);
-    vkDestroyFence(device, sync.in_flight_fences[i], nullptr);
-  }
-  vkFreeCommandBuffers(device, graphics_command_pool,
-                       (uint32_t)num_swap_chain_images, command_buffers);
-  delete[] command_buffers;
+  vkDestroyFence(device, render_in_progress, nullptr);
+  vkDestroySemaphore(device, render_finished_semaphore, nullptr);
+  vkDestroySemaphore(device, image_available_semaphore, nullptr);
+  vkFreeCommandBuffers(device, graphics_command_pool, (uint32_t)1,
+                       &command_buffer);
 }

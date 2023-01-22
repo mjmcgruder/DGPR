@@ -273,9 +273,9 @@ void vrtxgen_metadata::compute_metadata_gpu(u32 N, core_geometry& geom)
 
   array<float> h_bf(Np1p3 * geom.refp.nbf3d);
 
-  buffer_set<u32> d_N(&precomp_sol_basis.dset, 0);
-  buffer_set<u32> d_p(&precomp_sol_basis.dset, 1);
-  buffer_set<float> d_bf(&precomp_sol_basis.dset, 2);
+  dbuffer<u32> d_N(&precomp_sol_basis.dset, 0);
+  dbuffer<u32> d_p(&precomp_sol_basis.dset, 1);
+  dbuffer<float> d_bf(&precomp_sol_basis.dset, 2);
 
   d_N.update(&N, 1);
   d_p.update(&p, 1);
@@ -369,8 +369,8 @@ void vrtxgen_metadata::compute_metadata_cpu(u64 N, output_type rend_var,
 
 // N is the interval count in each direction on the face
 void generate_elem_surface_vertices(entity& surface_geometry,
-                                    u64 swap_chain_image, core_geometry& geom,
-                                    simstate& U, u64 N, output_type rend_var,
+                                    core_geometry& geom, simstate& U, u64 N,
+                                    output_type rend_var,
                                     vrtxgen_metadata& metadata, real gamma,
                                     colormap* cmap)
 {
@@ -453,8 +453,8 @@ void generate_elem_surface_vertices(entity& surface_geometry,
     }
   }
 
-  surface_geometry.update_geometry(swap_chain_image, vertices.data,
-                                   vertices.len, indices.data, indices.len);
+  surface_geometry.update_geometry(vertices.data, vertices.len, indices.data,
+                                   indices.len);
 }
 
 void sample_element(u64 ei, u64 N, output_type rend_var, core_geometry& geom,
@@ -516,11 +516,10 @@ void cube_to_tets(T cube[8], T t0[4], T t1[4], T t2[4], T t3[4], T t4[4])
   t4[3] = cube[6];
 }
 
-void generate_slice_vertices(entity& slice_geometry, u64 swap_chain_image,
-                             core_geometry& geom, simstate& U, u64 N, v3 pp,
-                             v3 pn, output_type rend_var,
-                             vrtxgen_metadata& metadata, real gamma,
-                             colormap* cmap)
+void generate_slice_vertices(entity& slice_geometry, core_geometry& geom,
+                             simstate& U, u64 N, v3 pp, v3 pn,
+                             output_type rend_var, vrtxgen_metadata& metadata,
+                             real gamma, colormap* cmap)
 {
   u64 Np1       = N + 1;
   u64 Np1p3     = Np1 * Np1 * Np1;
@@ -677,7 +676,7 @@ void generate_slice_vertices(entity& slice_geometry, u64 swap_chain_image,
   delete[] elem_sample_values;
   delete[] elem_sample_ref_positions;
 
-  slice_geometry.update_geometry(swap_chain_image, vertices.data(),
+  slice_geometry.update_geometry(vertices.data(),
                                  vertices.size(), indices.data(),
                                  indices.size());
 #undef NI

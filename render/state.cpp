@@ -103,8 +103,6 @@ bool execute_line_probe    = false;
 
 /* constatns */
 
-const int MAX_FRAMES_IN_FLIGHT = 2;
-
 const u32 initial_win_width  = 800;
 const u32 initial_win_height = 600;
 
@@ -223,4 +221,16 @@ void clean_and_exit(const char* file, int line, ...)
       printf("result code: %d\n", fail_result); \
       VKTERMINATE(__VA_ARGS__);                 \
     }                                           \
+  }
+
+#define VK_CHECK_SUBOPTIMAL(func, ...)             \
+  {                                                \
+    VkResult fail_result = (func);                 \
+    if (fail_result != VK_SUCCESS &&               \
+        fail_result != VK_ERROR_OUT_OF_DATE_KHR && \
+        fail_result != VK_SUBOPTIMAL_KHR)          \
+    {                                              \
+      printf("result code: %d\n", fail_result);    \
+      VKTERMINATE(__VA_ARGS__);                    \
+    }                                              \
   }
