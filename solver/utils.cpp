@@ -56,3 +56,14 @@ int_type linear_index(int_type ndim, int_type* dims, int_type* indx)
 
   return lindx;
 }
+
+template<typename T>
+T clamp(T v, T min, T max) {
+  if (v < min) {
+    return min;
+  } else if (max < v) {
+    return max;
+  } else {
+    return v;
+  }
+}

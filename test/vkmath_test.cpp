@@ -47,21 +47,24 @@ void run_vkgpu_test(u32 m, u32 k, u32 n)
     Cgpu[i] = 0.f;
   }
 
-  dbuffer<u32> d_m(&vkmatmul.dset, 0);
-  dbuffer<u32> d_k(&vkmatmul.dset, 1);
-  dbuffer<u32> d_n(&vkmatmul.dset, 2);
-  dbuffer<float> d_A(&vkmatmul.dset, 3);
-  dbuffer<float> d_B(&vkmatmul.dset, 4);
-  dbuffer<float> d_C(&vkmatmul.dset, 5);
+  dbuffer<u32> d_m, d_k, d_n;
+  dbuffer<float> d_A, d_B, d_C;
+
+  d_m.bind(&vkmatmul.dset, 0);
+  d_k.bind(&vkmatmul.dset, 1);
+  d_n.bind(&vkmatmul.dset, 2);
+  d_A.bind(&vkmatmul.dset, 3);
+  d_B.bind(&vkmatmul.dset, 4);
+  d_C.bind(&vkmatmul.dset, 5);
 
   d_m.update(&m, 1);
   d_k.update(&k, 1);
   d_n.update(&n, 1);
   d_A.update(A.data, A.len);
   d_B.update(B.data, B.len);
-  d_C.update(Cgpu.data, Cgpu.len);  // don't like that you have to do this
-                                    // seems like this issue stems from malloc
-                                    // and copy being the same operation
+  d_C.allocate(Cgpu.len);  // don't like that you have to do this
+                           // seems like this issue stems from malloc
+                           // and copy being the same operation
 
   double cpu_start = MPI_Wtime();
   matmul(m, k, n, 1.f, A.data, B.data, 0.f, Ccpu.data);

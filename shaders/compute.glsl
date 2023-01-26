@@ -77,8 +77,8 @@ void main()
 
   for (uint bf_pos = gl_GlobalInvocationID.x; bf_pos < bf_len; bf_pos += stride)
   {
-    uint node_num = bf_pos / nbf3d;  // truncation intentional
-    uint bi       = bf_pos - (node_num * nbf3d);
+    uint bi       = bf_pos / Np1p3;  // truncation intentional
+    uint node_num = bf_pos - (bi * Np1p3);
 
     uint nx, ny, nz;
     split3(node_num, Np1, nx, ny, nz);

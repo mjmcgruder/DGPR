@@ -226,10 +226,10 @@ struct dbuffer
 
   dbuffer();
   dbuffer(descriptor_set* _descset, u32 _binding,
-             VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-             memory_residency locale  = memloc_device);
+          VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+          memory_residency locale  = memloc_device);
 
-  dbuffer(dbuffer& oth)            = delete;
+  dbuffer(dbuffer& oth) = delete;
   dbuffer& operator=(dbuffer& oth) = delete;
 
   dbuffer(dbuffer&& oth) noexcept;
@@ -243,13 +243,41 @@ struct dbuffer
   void send(T* input_data, u64 count);
   void retrieve(T* output);
   void update(T* input_data, u64 count);
+  void bind(descriptor_set* _descset, u32 _binding);
+
+  void update_dset();
 
   void clear();
 };
 
 template<typename T>
+void dbuffer<T>::update_dset()
+{
+  VkDeviceSize buffer_size = nelems * sizeof(T);
+
+  VkDescriptorBufferInfo buffer_info{};
+  buffer_info.buffer = buffer;
+  buffer_info.offset = 0;
+  buffer_info.range  = buffer_size;
+
+  VkWriteDescriptorSet descriptor_write{};
+  descriptor_write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  descriptor_write.dstSet          = descset->dset;
+  descriptor_write.dstBinding      = binding;
+  descriptor_write.dstArrayElement = 0;
+  descriptor_write.descriptorType =
+  descset->layout->layout_bindings[binding].descriptorType;
+  descriptor_write.descriptorCount  = 1;
+  descriptor_write.pBufferInfo      = &buffer_info;
+  descriptor_write.pImageInfo       = nullptr;
+  descriptor_write.pTexelBufferView = nullptr;
+
+  vkUpdateDescriptorSets(device, 1, &descriptor_write, 0, nullptr);
+}
+
+template<typename T>
 dbuffer<T>::dbuffer(descriptor_set* _descset, u32 _binding,
-                          VkBufferUsageFlags usage, memory_residency locale)
+                    VkBufferUsageFlags usage, memory_residency locale)
 {
   buffer  = VK_NULL_HANDLE;
   memory  = VK_NULL_HANDLE;
@@ -259,6 +287,14 @@ dbuffer<T>::dbuffer(descriptor_set* _descset, u32 _binding,
 
   usage_flags   = usage;
   memory_locale = locale;
+}
+
+template<typename T>
+void dbuffer<T>::bind(descriptor_set* _descset, u32 _binding)
+{
+  descset = _descset;
+  binding = _binding;
+  update_dset();
 }
 
 template<typename T>
@@ -300,24 +336,7 @@ void dbuffer<T>::allocate(u64 count)
 
   if (descset && buffer_outdated)
   {
-    VkDescriptorBufferInfo buffer_info{};
-    buffer_info.buffer = buffer;
-    buffer_info.offset = 0;
-    buffer_info.range  = buffer_size;
-
-    VkWriteDescriptorSet descriptor_write{};
-    descriptor_write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet          = descset->dset;
-    descriptor_write.dstBinding      = binding;
-    descriptor_write.dstArrayElement = 0;
-    descriptor_write.descriptorType =
-    descset->layout->layout_bindings[binding].descriptorType;
-    descriptor_write.descriptorCount  = 1;
-    descriptor_write.pBufferInfo      = &buffer_info;
-    descriptor_write.pImageInfo       = nullptr;
-    descriptor_write.pTexelBufferView = nullptr;
-
-    vkUpdateDescriptorSets(device, 1, &descriptor_write, 0, nullptr);
+    update_dset();
   }
 }
 
@@ -409,7 +428,7 @@ memory(VK_NULL_HANDLE),
 nelems(0),
 descset(nullptr),
 binding(0),
-usage_flags(0),
+usage_flags(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
 memory_locale(memloc_device)
 {}
 

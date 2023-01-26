@@ -45,7 +45,7 @@ struct core_geometry
   //   each element in the domain
   //     each geometry node ordered [z [y [x]]]
   //       coordinates stored [x y z]
-  array<real> node_;
+  array<real, 3> node_;
 
   // Real space element mass matrices for each element in the domain.
   // A single mass matrix is stored for each element in the order of the
@@ -133,7 +133,7 @@ struct simstate
   u64 rank;
   u64 nbfnc;
   u64 nelem;
-  array<real> U;
+  array<real, 3> U;
 
   simstate();
   simstate(core_geometry& geom);
@@ -175,7 +175,7 @@ nz(nelem_z),
 nelem(nx * ny * nz),
 refp(p, 2 * p + 1),
 refq(q, 2 * p + 1),
-node_(node_size()),
+node_({3, refq.nbf3d, nelem}),
 Minv_(Minv_size()),
 vJ_(vJ_size()),
 vgrad_(vgrad_size()),
@@ -461,7 +461,10 @@ simstate::simstate() : rank(0), nbfnc(0), nelem(0), U()
 {}
 
 simstate::simstate(core_geometry& geom) :
-rank(5), nbfnc(geom.refp.nbf3d), nelem(geom.nx * geom.ny * geom.nz), U(size())
+rank(5),
+nbfnc(geom.refp.nbf3d),
+nelem(geom.nx * geom.ny * geom.nz),
+U({nbfnc, rank, nelem})
 {}
 
 real& simstate::operator()(u64 elm, u64 rnk, u64 bfn)

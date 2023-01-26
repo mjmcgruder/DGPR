@@ -30,7 +30,7 @@ template<typename T, u64 ndim = 1>
 struct array
 {
   u64 len;
-  u64 dims[ndim];
+  u64 dims[ndim];  // dim at 0 iterates fastest, ndim - 1 slowest
   T* data;
 
   // --
@@ -38,6 +38,7 @@ struct array
   array();
   array(u64 len_);
   array(std::initializer_list<u64>);
+  array(std::initializer_list<u64>, array<T, ndim>& oth);
 
   array(const array& oth);
   array(array&& oth) noexcept;
@@ -86,6 +87,28 @@ array<T, ndim>::array(std::initializer_list<u64> _dims)
   }
 
   data = new T[len];
+}
+
+template<typename T, u64 ndim>
+array<T, ndim>::array(std::initializer_list<u64> permutation,
+                      array<T, ndim>& oth)
+{
+  if (permutation.size() != ndim)
+    errout("array permutation has incorrect dimension count %d, expected %d",
+           permutation.size(), ndim);
+
+  len = oth.len;
+
+  u64 di = 0;
+  for (const u64& p : permutation)
+  {
+    dims[di] = oth.dims[p];
+    ++di;
+  }
+
+  data = new T[len];
+
+  oth.shuffle(permutation, data);
 }
 
 template<typename T, u64 ndim>

@@ -243,8 +243,15 @@ struct AABB
 // other useful parameters.
 struct vrtxgen_metadata
 {
+  core_geometry& geom;
+
   // gpu compute functions
   compute_pipeline precomp_sol_basis;
+  compute_pipeline precomp_geo_basis;
+  compute_pipeline vkmatmul;
+
+  dbuffer<float> d_state;
+  dbuffer<float> d_nodes;
 
   // pre-computes
   array<AABB> elem_bboxes;
@@ -255,45 +262,116 @@ struct vrtxgen_metadata
   real global_output_max = -REAL_MAX;
   v3 domain_center;
 
-  vrtxgen_metadata();
+  vrtxgen_metadata(core_geometry& geom);
 
   void compute_metadata_cpu(u64 N, output_type rend_var, simstate& U,
-                            core_geometry& geom, real gamma);
-  void compute_metadata_gpu(u32 N, core_geometry& geom);
+                            real gamma);
+  void compute_metadata_gpu(u32 N);
 };
 
-vrtxgen_metadata::vrtxgen_metadata() :
-precomp_sol_basis("compute_precomp_basis.spv", 3){}
+vrtxgen_metadata::vrtxgen_metadata(core_geometry& _geom) :
+geom(_geom),
+precomp_sol_basis("compute_precomp_basis.spv", 3),
+precomp_geo_basis("compute_precomp_basis.spv", 3),
+vkmatmul("compute_gemm.spv", 6)
+{
+  array<float, 3> state_shuffle({0, 1, 2}, render_state->U);
+  d_state.update(state_shuffle.data, state_shuffle.len);
 
-void vrtxgen_metadata::compute_metadata_gpu(u32 N, core_geometry& geom)
+  array<float, 3> nodes_shuffle({1, 0, 2}, geom.node_);
+  d_nodes.update(nodes_shuffle.data, nodes_shuffle.len);
+}
+
+void vrtxgen_metadata::compute_metadata_gpu(u32 N)
 {
   u32 p     = geom.p;
+  u32 q     = geom.q;
   u32 Np1   = N + 1;
   u32 Np1p3 = Np1 * Np1 * Np1;
 
-  array<float> h_bf(Np1p3 * geom.refp.nbf3d);
+  dbuffer<u32> d_N, d_p;
+  dbuffer<float> d_bfunc_precomp;
+  dbuffer<float> d_gfunc_precomp;
+  dbuffer<float> d_node_state;
+  dbuffer<float> d_node_position;
 
-  dbuffer<u32> d_N(&precomp_sol_basis.dset, 0);
-  dbuffer<u32> d_p(&precomp_sol_basis.dset, 1);
-  dbuffer<float> d_bf(&precomp_sol_basis.dset, 2);
+  // solution basis precompute
 
-  d_N.update(&N, 1);
-  d_p.update(&p, 1);
-  d_bf.update(h_bf.data, h_bf.len);
+  {
+    // array<float, 2> h_bf({Np1p3, geom.refp.nbf3d});
 
-  precomp_sol_basis.run((h_bf.len + (256 - 1)) / 256, 1, 1);
+    d_N.update(&N, 1);
+    d_p.update(&p, 1);
+    d_bfunc_precomp.allocate(Np1p3 * geom.refp.nbf3d);
 
-  d_bf.retrieve(h_bf.data);
+    d_N.bind(&precomp_sol_basis.dset, 0);
+    d_p.bind(&precomp_sol_basis.dset, 1);
+    d_bfunc_precomp.bind(&precomp_sol_basis.dset, 2);
+    precomp_sol_basis.run(((Np1p3 * geom.refp.nbf3d) + (256 - 1)) / 256, 1, 1);
 
-  // for (u64 i = 0; i < bfunc_precomp.len; ++i)
-  // {
-  //   printf("%+.3e %+.3e\n", bfunc_precomp[i], h_bf[i]);
-  // }
+    // d_bf.retrieve(h_bf.data);
+
+    // array<float> bf_cpu(h_bf.len);
+    // h_bf.shuffle({1, 0}, bf_cpu.data);
+
+    // for (u64 i = 0; i < bfunc_precomp.len; ++i)
+    // {
+    //   printf("%+.3e %+.3e\n", bfunc_precomp[i], bf_cpu[i]);
+    // }
+  }
+
+  // geometry basis precompute
+
+  {
+    // array<float, 2> h_bf({Np1p3, geom.refq.nbf3d});
+
+    d_N.update(&N, 1);
+    d_p.update(&q, 1);
+    d_gfunc_precomp.allocate(Np1p3 * geom.refq.nbf3d);
+
+    d_N.bind(&precomp_geo_basis.dset, 0);
+    d_p.bind(&precomp_geo_basis.dset, 1);
+    d_gfunc_precomp.bind(&precomp_geo_basis.dset, 2);
+    precomp_geo_basis.run(((Np1p3 * geom.refq.nbf3d) + (256 - 1)) / 256, 1, 1);
+
+    // d_gfunc_precomp.retrieve(h_bf.data);
+
+    // array<float> bf_cpu(h_bf.len);
+    // h_bf.shuffle({1, 0}, bf_cpu.data);
+
+    // for (u64 i = 0; i < gfunc_precomp.len; ++i)
+    // {
+    //   printf("%+.3e %+.3e\n", gfunc_precomp[i], bf_cpu[i]);
+    // }
+  }
+
+  {
+    u32 TILE_SIZE = 16;
+
+    u32 m = geom.nelem * render_state->rank;
+    u32 k = geom.refp.nbf3d;
+    u32 n = Np1p3;
+
+    dbuffer<u32> d_m, d_k, d_n;
+
+    d_m.update(&m, 1);
+    d_k.update(&k, 1);
+    d_n.update(&n, 1);
+    d_node_state.allocate(m * n);
+
+    d_m.bind(            &vkmatmul.dset, 0);
+    d_k.bind(            &vkmatmul.dset, 1);
+    d_n.bind(            &vkmatmul.dset, 2);
+    d_state.bind(        &vkmatmul.dset, 3);
+    d_bfunc_precomp.bind(&vkmatmul.dset, 4);
+    d_node_state.bind(   &vkmatmul.dset, 5);
+    vkmatmul.run((n + (TILE_SIZE - 1)) / TILE_SIZE,
+                 (m + (TILE_SIZE - 1)) / TILE_SIZE, 1);
+  }
 }
 
 void vrtxgen_metadata::compute_metadata_cpu(u64 N, output_type rend_var,
-                                            simstate& U, core_geometry& geom,
-                                            real gamma)
+                                            simstate& U, real gamma)
 {
 #define NI(i, j, k) (Np1 * Np1 * (k) + Np1 * (j) + (i))  // sub-elem node index
 

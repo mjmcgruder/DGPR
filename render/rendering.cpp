@@ -131,17 +131,6 @@ void record_command_buffer(uniform<scene_transform>& scene_ubo,
            "failed to end command buffer!");
 }
 
-template<typename T>
-T clamp(T v, T min, T max) {
-  if (v < min) {
-    return min;
-  } else if (max < v) {
-    return max;
-  } else {
-    return v;
-  }
-}
-
 void make_swap_chain() {
 
   VkSurfaceCapabilitiesKHR capabilities;
@@ -357,9 +346,9 @@ void render_loop(core_geometry& geom, u64 time_step, real gamma,
 
   uniform<scene_transform> scene_ubo(&scene_pipeline.scene_layout);
 
-  vrtxgen_metadata metadata;
-
   render_state = rendering_outputs.get_strict("state");
+
+  vrtxgen_metadata metadata(geom);
 
   {
     vertex vertices[] = {

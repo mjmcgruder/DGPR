@@ -98,9 +98,9 @@ void game(list<entity>& scene_list, list<entity>& ui_list,
     recompute = true;
 
     metadata.compute_metadata_cpu(resolution, render_output, *render_state,
-                                  geom, gamma);
+                                  gamma);
 
-    metadata.compute_metadata_gpu(resolution, geom);
+    metadata.compute_metadata_gpu(resolution);
 
     recompute_state = false;
   }
