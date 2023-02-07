@@ -16,7 +16,32 @@
 
 #pragma once
 
-#include <helper_types.cpp>
+#include "helper_types.cpp"
+#include "geometry_shared.cpp"
+
+/* struct storing pre-computes and workspace values on the device side ------ */
+
+struct custore
+{
+  u32 solarr_size = 0;
+};
+
+__host__ custore custore_make(shared_geometry* geom)
+{
+  custore store;
+  core_geometry* core = &(geom->core);
+
+  store.solarr_size = core->nelem * core->refp.nbf3d * 5;
+
+  return store;
+}
+
+__host__ void custore_free(custore* store)
+{
+
+}
+
+/* residual and related kernels --------------------------------------------- */
 
 #define TILE_SIZE 16
 
@@ -54,4 +79,9 @@ __global__ void cuda_gemm(u32 m, u32 k, u32 n, float* A, float* B, float* C)
 
   if (rC < m && cC < n)
     C[n * rC + cC] = accC;
+}
+
+__host__ void cuda_residual(custore store, float* d_R)
+{
+  cudaMemset(d_R, 0, store.solarr_size);
 }
