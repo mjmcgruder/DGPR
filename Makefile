@@ -7,10 +7,11 @@ include local.mk
 
 shaders := graphics_vertex.spv graphics_fragment.spv compute_gemm.spv compute_precomp_basis.spv
 
-sol  := $(wildcard solver/*.cpp)
-cuda := $(wildcard solver/*.cu)
-tst  := $(wildcard test/*.cpp)
-rnd  := $(wildcard render/*.cpp)
+sol   := $(wildcard solver/*.cpp)
+cuda  := $(wildcard solver/*.cu)
+tst   := $(wildcard test/*.cpp)
+tstcu := $(wildcard test/*.cu)
+rnd   := $(wildcard render/*.cpp)
 
 BIN  := bin
 
@@ -18,6 +19,7 @@ DG     := $(BIN)/dg
 CUDG   := $(BIN)/cudg
 TEST   := $(BIN)/test
 TESTVK := $(BIN)/testvk
+TESTCU := $(BIN)/testcu
 REND   := $(BIN)/rend
 SHDR   := $(patsubst %,$(BIN)/%,$(shaders))
 
@@ -38,9 +40,12 @@ test: $(TEST)
 .PHONY : testvk
 testvk: $(TESTVK)
 
+.PHONY : testcu
+testcu: $(TESTCU)
+
 .PHONY : clean
 clean:
-	rm -f $(DG) $(CUDG) $(TEST) $(TESTVK) $(REND) $(SHDR)
+	rm -f $(DG) $(CUDG) $(TEST) $(TESTVK) $(TESTCU) $(REND) $(SHDR)
 
 # main targets
 
@@ -63,6 +68,10 @@ $(TEST): $(sol) $(tst)
 $(TESTVK): $(sol) $(rnd) $(tst) $(SHDR) 
 	@mkdir -p $(BIN)
 	$(CXX) $(CXXFLAGS) $(TEST_CXXFLAGS) -DSINGLE_PRECISION -o$@ test/vkmath_test.cpp $(TEST_LDFLAGS) $(VULKAN_LDFLAGS)
+
+$(TESTCU): $(sol) $(tst) $(tstcu)
+	@mkdir -p $(BIN)
+	nvcc $(CUFLAGS) $(MPI_CXXFLAGS) $(TEST_CXXFLAGS) -o $@ test/cumath_test.cu $(TEST_LDFLAGS) $(MPI_LDFLAGS)
 
 # shaders
 
