@@ -30,8 +30,7 @@ void run_cugpu_test(u32 m, u32 n, u32 k)
   array<float> A(m * k);
   array<float> B(k * n);
   array<float> Ccpu(m * n);
-  array<float> Cgpu0(m * n);
-  array<float> Cgpu1(m * n);
+  array<float> Cgpu(m * n);
 
   for (u32 i = 0; i < m * k; ++i)
     A[i] = dst(mt);
@@ -40,12 +39,11 @@ void run_cugpu_test(u32 m, u32 n, u32 k)
   for (u32 i = 0; i < m * n; ++i)
     Ccpu[i] = 0.f;
 
-  float *d_A, *d_B, *d_C0, *d_C1;
+  float *d_A, *d_B, *d_C;
 
   cudaMalloc(&d_A, A.len * sizeof(*d_A));
   cudaMalloc(&d_B, B.len * sizeof(*d_B));
-  cudaMalloc(&d_C0, Cgpu0.len * sizeof(*d_C0));
-  cudaMalloc(&d_C1, Cgpu1.len * sizeof(*d_C1));
+  cudaMalloc(&d_C, Cgpu.len * sizeof(*d_C));
 
   cudaMemcpy(d_A, A.data, A.len * sizeof(*d_A), cudaMemcpyHostToDevice);
   cudaMemcpy(d_B, B.data, B.len * sizeof(*d_B), cudaMemcpyHostToDevice);
@@ -54,41 +52,41 @@ void run_cugpu_test(u32 m, u32 n, u32 k)
   matmul(m, k, n, 1.f, A.data, B.data, 0.f, Ccpu.data);
   double cpu_end = MPI_Wtime();
 
-  dim3 block(16, 16);
+  dim3 block(TILE_SIZE, TILE_SIZE);
   dim3 grid((n + (block.x - 1)) / block.x, 
             (m + (block.y - 1)) / block.y);
 
-  double gpu_start0 = MPI_Wtime();
-  cuda_gemm_0<<<grid, block>>>(m, k, n, d_A, d_B, d_C0);
+  double gpu_start = MPI_Wtime();
+  cuda_gemm<<<grid, block>>>(m, k, n, d_A, d_B, d_C);
   cudaDeviceSynchronize();
-  double gpu_end0 = MPI_Wtime();
+  double gpu_end = MPI_Wtime();
 
-  double gpu_start1 = MPI_Wtime();
-  cuda_gemm_1<<<grid, block>>>(m, k, n, d_A, d_B, d_C1);
-  cudaDeviceSynchronize();
-  double gpu_end1 = MPI_Wtime();
+  printf("cpu: %.5fs gpu: %.5fs\n", 
+         cpu_end - cpu_start, gpu_end - gpu_start);
 
-  printf("cpu: %.5fs gpu0: %.5fs gpu1: %.5fs\n", 
-         cpu_end - cpu_start, gpu_end0 - gpu_start0, gpu_end1 - gpu_start1);
-
-  cudaMemcpy(Cgpu0.data, d_C0, Cgpu0.len * sizeof(*d_C0), 
-             cudaMemcpyDeviceToHost);
-  cudaMemcpy(Cgpu1.data, d_C1, Cgpu1.len * sizeof(*d_C1), 
-             cudaMemcpyDeviceToHost);
+  cudaMemcpy(Cgpu.data, d_C, Cgpu.len * sizeof(*d_C), cudaMemcpyDeviceToHost);
 
   for (u64 i = 0; i < Ccpu.len; ++i)
   {
-    EXPECT_FLOAT_EQ(Ccpu[i], Cgpu0[i], 10);
-    EXPECT_FLOAT_EQ(Ccpu[i], Cgpu1[i], 10);
+    EXPECT_FLOAT_EQ(Ccpu[i], Cgpu[i], 10);
   }
 
   cudaFree(d_A);
   cudaFree(d_B);
-  cudaFree(d_C0);
-  cudaFree(d_C1);
+  cudaFree(d_C);
 }
 
 TEST(cumath_test_matmul, 1)
 {
-  run_cugpu_test(1024, 1024, 1024);
+  run_cugpu_test(17, 17, 17);     // small stuff
+  run_cugpu_test(128, 128, 128);  // square, tile divides evenly
+  run_cugpu_test(100, 100, 100);  // square, tile divides unevenly
+  run_cugpu_test(128, 128, 150);  // short and fat C, inner dim divs evenly
+  run_cugpu_test(150, 128, 128);  // tall and skinny C, inner dim divs evenly
+  run_cugpu_test(128, 175, 150);  // short and fat C, inner dim divs unevenly
+  run_cugpu_test(150, 175, 128);  // tall n skinny C, inner dim divs unevenly
+
+  run_cugpu_test(1024, 1024, 1024);  // largeish, divs evenly
+  run_cugpu_test(900, 1000, 950);    // largeish, divs unevenly
+  run_cugpu_test(2000, 4000, 1500);  // more largeish, divs unevenly
 }

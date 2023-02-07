@@ -18,28 +18,9 @@
 
 #include <helper_types.cpp>
 
-// naive matrix multiplication
-__global__ void cuda_gemm_0(u32 m, u32 k, u32 n, float* A, float* B, float* C)
-{
-  u32 rC = blockDim.y * blockIdx.y + threadIdx.y;
-  u32 cC = blockDim.x * blockIdx.x + threadIdx.x;
-
-  if (rC > m || cC > n)
-    return;
-
-  float accC = 0.f;
-  for (u32 i = 0; i < k; ++i)
-  {
-    accC += A[k * rC + i] * B[n * i + cC];
-  }
-
-  C[n * rC + cC] = accC;
-}
-
 #define TILE_SIZE 16
 
-// reasonable matrix multiplication
-__global__ void cuda_gemm_1(u32 m, u32 k, u32 n, float* A, float* B, float* C)
+__global__ void cuda_gemm(u32 m, u32 k, u32 n, float* A, float* B, float* C)
 {
   __shared__ float tileA[TILE_SIZE][TILE_SIZE];
   __shared__ float tileB[TILE_SIZE][TILE_SIZE];
@@ -49,23 +30,23 @@ __global__ void cuda_gemm_1(u32 m, u32 k, u32 n, float* A, float* B, float* C)
   u32 rC = TILE_SIZE * blockIdx.y + rT;
   u32 cC = TILE_SIZE * blockIdx.x + cT;
 
-  float accC = 0.;
+  float accC = 0.f;
 
   for (u32 bk = 0; bk < (k + TILE_SIZE - 1) / TILE_SIZE; ++bk)
   {
     if ((rC) < m && (TILE_SIZE * bk + cT) < k)
       tileA[rT][cT] = A[k * (rC) + (TILE_SIZE * bk + cT)];
     else
-      tileA[rT][cT] = 0.;
+      tileA[rT][cT] = 0.f;
 
     if ((TILE_SIZE * bk + rT) < k && (cC) < n)
       tileB[rT][cT] = B[n * (TILE_SIZE * bk + rT) + (cC)];
     else
-      tileB[rT][cT] = 0.;
+      tileB[rT][cT] = 0.f;
 
     __syncthreads();
 
-    for (uint i = 0; i < TILE_SIZE; ++i)
+    for (u32 i = 0; i < TILE_SIZE; ++i)
       accC += tileA[rT][i] * tileB[i][cT];
 
     __syncthreads();
