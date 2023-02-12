@@ -70,15 +70,23 @@ int main(int argc, char** argv)
     tstep += 1;  // starting on the step after the one that was read
   }
 
-  custore store = custore_make(&geom);
 
-  float* d_R;
-  cudaMalloc(&d_R, store.solarr_size * sizeof(*d_R));
+
+  simstate& U = outputs.get("state");
+
+  float *d_U, *d_R;  // [rank [elem [bfuncs]]]
+  cudaMalloc(&d_R, U.size() * sizeof(float));
+  cudaMalloc(&d_U, U.size() * sizeof(float));
+
+  custore store = custore_make(&geom, &U, d_U);
 
   cuda_residual(store, d_R);
 
   cudaFree(d_R);
+  cudaFree(d_U);
   custore_free(&store);
+
+
 
   /* data prep */
 

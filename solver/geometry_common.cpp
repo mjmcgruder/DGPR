@@ -57,7 +57,7 @@ struct core_geometry
   // element in the geometry. The format is as follows:
   //   each element ordered [z [y [x]]]
   //     each volume quadrature point (ordered by "basis" struct)
-  array<real> vJ_;
+  array<real, 2> vJ_;
 
   // Gradient storage on each volume quadrature point on each element in the
   // geometry. The format is as follows:
@@ -65,7 +65,7 @@ struct core_geometry
   //     each volume quadrautre point (ordered by 3D "quad" struct)
   //       for each each basis function (ordered by "basis" struct)
   //         gradient elements stored [d_dx d_dy d_dz]
-  array<real> vgrad_;
+  array<real, 4> vgrad_;
 
   // Gradient storage at each face quadrature point of every face on every
   // element in the geometry. The format is:
@@ -74,7 +74,7 @@ struct core_geometry
   //       each face quadrature point as ordered in a 2D "quad" struct
   //         each basis function ordered by "basis" struct
   //           the gradient stored [d_dx, d_dy, d_dz]
-  array<real> fgrad_;
+  array<real, 5> fgrad_;
 
   // Stores neighboring procs over -x +x -y +y -z +z bounds. If there is no
   // neighboring processor there must be a boundary on that domain face and
@@ -177,9 +177,9 @@ refp(p, 2 * p + 1),
 refq(q, 2 * p + 1),
 node_({3, refq.nbf3d, nelem}),
 Minv_(Minv_size()),
-vJ_(vJ_size()),
-vgrad_(vgrad_size()),
-fgrad_(fgrad_size())
+vJ_{refp.vqrule.n, nelem},
+vgrad_{3, refp.nbf3d, refp.vqrule.n, nelem},
+fgrad_{3, refp.nbf3d, refp.fqrule.n, 6, nelem}
 {
   for (int i = 0; i < 6; ++i)
     bounds[i] = boundaries[i];

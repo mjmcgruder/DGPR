@@ -173,17 +173,24 @@ void array<T, ndim>::shuffle(std::initializer_list<u64> permutation, T* output)
 }
 
 template<typename T, u64 ndim>
-array<T, ndim>::array(const array<T, ndim>& oth) :
-len(oth.len), data(new T[len]())
+array<T, ndim>::array(const array<T, ndim>& oth)
 {
+  len = oth.len;
+
+  for (u64 i = 0; i < ndim; ++i)
+    dims[i] = oth.dims[i];
+
+  data = new T[len]();
   for (u64 i = 0; i < len; ++i)
     data[i] = oth.data[i];
 }
 
 template<typename T, u64 ndim>
-array<T, ndim>::array(array<T, ndim>&& oth) noexcept :
-len(oth.len), data(oth.data)
+array<T, ndim>::array(array<T, ndim>&& oth) noexcept
 {
+  len  = oth.len;
+  data = oth.data;
+
   oth.len  = 0;
   oth.data = nullptr;
 }
@@ -192,10 +199,14 @@ template<typename T, u64 ndim>
 array<T, ndim>& array<T, ndim>::operator=(const array<T, ndim>& oth)
 {
   delete[] data;
-  len  = oth.len;
+
+  len = oth.len;
+  for (u64 i = 0; i < ndim; ++i)
+    dims[i] = oth.dims[i];
   data = new T[len]();
   for (u64 i = 0; i < len; ++i)
     data[i] = oth.data[i];
+
   return *this;
 }
 
@@ -203,8 +214,12 @@ template<typename T, u64 ndim>
 array<T, ndim>& array<T, ndim>::operator=(array<T, ndim>&& oth) noexcept
 {
   delete[] data;
-  len      = oth.len;
-  data     = oth.data;
+
+  len = oth.len;
+  for (u64 i = 0; i < ndim; ++i)
+    dims[i] = oth.dims[i];
+  data = oth.data;
+
   oth.len  = 0;
   oth.data = nullptr;
   return *this;
