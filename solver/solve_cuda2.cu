@@ -27,30 +27,29 @@ struct custore
   u32 nbfp        = 0;
   u32 nvolqp      = 0;
   u32 solarr_size = 0;
+  u32 rank        = 5;
 
-  float* vgrad_;  // [direction [elements [test funcs [qpoints]]]]
+  real* vgrad_;  // [elems [bfuncs [direction [qpoints]]]]
 
-  __forceinline__ float index_state(float* U, u32 bi, u32 ei, u32 ri)
+  __forceinline__ real index_state(real* U, u32 bi, u32 ei, u32 ri)
   {
-    return U[nbfp * (nelem * ri + ei) + bi];
+    return U[nbfp * (rank * ei + ri) + bi];
   }
 
-  __forceinline__ float vgrad(u32 qi, u32 ti, u32 ei, u32 di)
+  __forceinline__ real vgrad(u32 qi, u32 ti, u32 ei, u32 di)
   {
-    return vgrad_[nvolqp * (nbfp * (nelem * di + ei) + ti) + qi];
+    return vgrad_[nvolqp * (3 * (nbfp * ei + ti) + di) + qi];
   }
 };
 
-__host__ custore custore_make(shared_geometry* geom, simstate* U, float* d_U)
+__host__ custore custore_make(shared_geometry* geom, simstate* U, real* d_U)
 {
   custore store;
   core_geometry* core = &(geom->core);
 
   /* initialize state */
 
-  array<float, 3> shuffle_U({0, 2, 1}, U->U);
-  cudaMemcpy(d_U, shuffle_U.data, shuffle_U.len * sizeof(float),
-             cudaMemcpyHostToDevice);
+  cudaMemcpy(d_U, U->U.data, U->U.len * sizeof(real), cudaMemcpyHostToDevice);
 
   /* initialize pre-computes */
 
@@ -60,10 +59,10 @@ __host__ custore custore_make(shared_geometry* geom, simstate* U, float* d_U)
   store.nvolqp      = core->refp.vqrule.n;
 
   // volume basis function gradient evaluations
-  array<float, 4> shuffle_vgrad({1, 2, 0, 3}, geom->core.vgrad_);
-  cudaMalloc(&store.vgrad_, shuffle_vgrad.len * sizeof(float));
+  array<real, 4> shuffle_vgrad({2, 0, 1, 3}, geom->core.vgrad_);
+  cudaMalloc(&store.vgrad_, shuffle_vgrad.len * sizeof(real));
   cudaMemcpy(store.vgrad_, shuffle_vgrad.data, 
-             shuffle_vgrad.len * sizeof(float), cudaMemcpyHostToDevice);
+             shuffle_vgrad.len * sizeof(real), cudaMemcpyHostToDevice);
 
   return store;
 }
@@ -75,24 +74,29 @@ __host__ void custore_free(custore* store)
 
 /* residual and related kernels --------------------------------------------- */
 
-__global__ void cuda_evaluate_volume_gradients(custore store, float* U)
+__global__ void cuda_evaluate_volume_gradients(real* U, custore store)
 {
+  u32 ei = blockIdx.x;
 
+  u32 state_stride = store.nbfp * store.rank;
+  u32 vgrad_stride = store.nvolqp * 3 * store.nbfp;
+
+  
 }
 
 #define TILE_SIZE 16
 
-__global__ void cuda_gemm(u32 m, u32 k, u32 n, float* A, float* B, float* C)
+__global__ void cuda_gemm(u32 m, u32 k, u32 n, real* A, real* B, real* C)
 {
-  __shared__ float tileA[TILE_SIZE][TILE_SIZE];
-  __shared__ float tileB[TILE_SIZE][TILE_SIZE];
+  __shared__ real tileA[TILE_SIZE][TILE_SIZE];
+  __shared__ real tileB[TILE_SIZE][TILE_SIZE];
 
   u32 rT = threadIdx.y;
   u32 cT = threadIdx.x;
   u32 rC = TILE_SIZE * blockIdx.y + rT;
   u32 cC = TILE_SIZE * blockIdx.x + cT;
 
-  float accC = 0.f;
+  real accC = 0.f;
 
   for (u32 bk = 0; bk < (k + TILE_SIZE - 1) / TILE_SIZE; ++bk)
   {
@@ -118,7 +122,7 @@ __global__ void cuda_gemm(u32 m, u32 k, u32 n, float* A, float* B, float* C)
     C[n * rC + cC] = accC;
 }
 
-__host__ void cuda_residual(custore store, float* d_R)
+__host__ void cuda_residual(custore store, real* d_R)
 {
   cudaMemset(d_R, 0, store.solarr_size);
 }
