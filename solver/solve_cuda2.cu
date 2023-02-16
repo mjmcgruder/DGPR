@@ -42,34 +42,42 @@ struct custore
 
   /* indexing */
 
-  __forceinline__ __device__ real index_state(real* U, u32 bi, u32 ei, u32 ri)
+  __forceinline__ __device__ real& index_state(real* U, u32 bi, u32 ei, u32 ri)
   {
     return U[nbfp * (rank * ei + ri) + bi];
   }
 
-  __forceinline__ __device__ real veval(u32 qi, u32 bi, u32 ei)
+  __forceinline__ __device__ real& veval(u32 qi, u32 bi, u32 ei)
   {
     return veval_[nvolqp * (nbfp * ei + bi) + qi];
   }
 
-  __forceinline__ __device__ real vgrad(u32 qi, u32 bi, u32 ei, u32 di)
+  __forceinline__ __device__ real& vgrad(u32 qi, u32 bi, u32 ei, u32 di)
   {
     return vgrad_[nvolqp * (3 * (nbfp * ei + bi) + di) + qi];
   }
 
-  __forceinline__ __device__ real state_veval(u32 qi, u32 ri, u32 ei)
+  __forceinline__ __device__ real& state_veval(u32 qi, u32 ri, u32 ei)
   {
     return state_veval_[nvolqp * (rank * ei + ri) + qi];
   }
 
-  __forceinline__ __device__ real state_vgrad(u32 qi, u32 di, u32 ri, u32 ei)
+  __forceinline__ __device__ real& state_vgrad(u32 qi, u32 di, u32 ri, u32 ei)
   {
-    return state_vgrad_[nvolqp * (3 * (5 * ei + ri) + di) + qi];
+    return state_vgrad_[nvolqp * (3 * (rank * ei + ri) + di) + qi];
   }
 
   /* sizing */
 
+  __host__ u32 size_state_veval() const
+  {
+    return nvolqp * rank * nelem;
+  }
 
+  __host__ u32 size_state_vgrad() const
+  {
+    return nvolqp * 3 * rank * nelem;
+  }
 };
 
 __host__ custore custore_make(shared_geometry* geom, simstate* U, real* d_U)
@@ -96,31 +104,43 @@ __host__ custore custore_make(shared_geometry* geom, simstate* U, real* d_U)
 
   /* allocate (and initialize?) workspace */
 
-  cudaMalloc(&store.state_veval_, nvolqp * rank * nelem * sizeof(real));
+  cudaMalloc(&store.state_veval_, store.size_state_veval() * sizeof(real));
+  cudaMalloc(&store.state_vgrad_, store.size_state_vgrad() * sizeof(real));
 
   return store;
 }
 
 __host__ void custore_free(custore* store)
 {
+  cudaFree(store->veval_);
   cudaFree(store->vgrad_);
+  cudaFree(store->state_veval_);
+  cudaFree(store->state_vgrad_);
 }
 
 /* residual and related kernels --------------------------------------------- */
 
-__global__ void cuda_evaluate_volume_states()
+__global__ void cuda_evaluate_volume_states(real* U, custore store)
 {
-  // TODO: states and gradients together in one call?
+  u32 ei = blockIdx.x;
+
+  real tmp = 0.;
+  for (u32 i = threadIdx.x; i < store.nvolqp * store.rank; i += blockDim.x)
+  {
+    u32 ri = i / store.nvolqp;    
+    u32 qi = i % store.nvolqp;
+
+    for (u32 bi = 0; bi < store.nbfp; ++bi)
+    {
+      tmp += store.index_state(U, bi, ei, ri) * store.veval(qi, bi, ei);
+    }
+
+    store.state_veval(qi, ri, ei) = tmp;
+  }
 }
 
 __global__ void cuda_evaluate_volume_gradients(real* U, custore store)
 {
-  u32 ei = blockIdx.x;
-
-  u32 state_stride = store.nbfp * store.rank;
-  u32 vgrad_stride = store.nvolqp * 3 * store.nbfp;
-
-  
 }
 
 #define TILE_SIZE 16
