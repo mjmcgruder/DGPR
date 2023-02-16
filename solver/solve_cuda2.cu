@@ -23,23 +23,53 @@
 
 struct custore
 {
+  static constexpr u32 rank = 5;
+
   u32 nelem       = 0;
   u32 nbfp        = 0;
   u32 nvolqp      = 0;
   u32 solarr_size = 0;
-  u32 rank        = 5;
 
-  real* vgrad_;  // [elems [bfuncs [direction [qpoints]]]]
+  /* pre-computes */
 
-  __forceinline__ real index_state(real* U, u32 bi, u32 ei, u32 ri)
+  real* veval_ = nullptr;  // [elems [bfuncs [qpoints]]]
+  real* vgrad_ = nullptr;  // [elems [bfuncs [direction [qpoints]]]]
+
+  /* workspace */
+
+  real* state_veval_ = nullptr;
+  real* state_vgrad_ = nullptr;
+
+  /* indexing */
+
+  __forceinline__ __device__ real index_state(real* U, u32 bi, u32 ei, u32 ri)
   {
     return U[nbfp * (rank * ei + ri) + bi];
   }
 
-  __forceinline__ real vgrad(u32 qi, u32 ti, u32 ei, u32 di)
+  __forceinline__ __device__ real veval(u32 qi, u32 bi, u32 ei)
   {
-    return vgrad_[nvolqp * (3 * (nbfp * ei + ti) + di) + qi];
+    return veval_[nvolqp * (nbfp * ei + bi) + qi];
   }
+
+  __forceinline__ __device__ real vgrad(u32 qi, u32 bi, u32 ei, u32 di)
+  {
+    return vgrad_[nvolqp * (3 * (nbfp * ei + bi) + di) + qi];
+  }
+
+  __forceinline__ __device__ real state_veval(u32 qi, u32 ri, u32 ei)
+  {
+    return state_veval_[nvolqp * (rank * ei + ri) + qi];
+  }
+
+  __forceinline__ __device__ real state_vgrad(u32 qi, u32 di, u32 ri, u32 ei)
+  {
+    return state_vgrad_[nvolqp * (3 * (5 * ei + ri) + di) + qi];
+  }
+
+  /* sizing */
+
+
 };
 
 __host__ custore custore_make(shared_geometry* geom, simstate* U, real* d_U)
@@ -64,6 +94,10 @@ __host__ custore custore_make(shared_geometry* geom, simstate* U, real* d_U)
   cudaMemcpy(store.vgrad_, shuffle_vgrad.data, 
              shuffle_vgrad.len * sizeof(real), cudaMemcpyHostToDevice);
 
+  /* allocate (and initialize?) workspace */
+
+  cudaMalloc(&store.state_veval_, nvolqp * rank * nelem * sizeof(real));
+
   return store;
 }
 
@@ -73,6 +107,11 @@ __host__ void custore_free(custore* store)
 }
 
 /* residual and related kernels --------------------------------------------- */
+
+__global__ void cuda_evaluate_volume_states()
+{
+  // TODO: states and gradients together in one call?
+}
 
 __global__ void cuda_evaluate_volume_gradients(real* U, custore store)
 {
