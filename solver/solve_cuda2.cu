@@ -32,7 +32,7 @@ struct custore
 
   /* pre-computes */
 
-  real* veval_ = nullptr;  // [elems [bfuncs [qpoints]]]
+  real* veval_ = nullptr;  // [bfuncs [qpoints]]
   real* vgrad_ = nullptr;  // [elems [bfuncs [direction [qpoints]]]]
 
   /* workspace */
@@ -47,9 +47,9 @@ struct custore
     return U[nbfp * (rank * ei + ri) + bi];
   }
 
-  __forceinline__ __device__ real& veval(u32 qi, u32 bi, u32 ei)
+  __forceinline__ __device__ real& veval(u32 qi, u32 bi)
   {
-    return veval_[nvolqp * (nbfp * ei + bi) + qi];
+    return veval_[nvolqp * bi + qi];
   }
 
   __forceinline__ __device__ real& vgrad(u32 qi, u32 bi, u32 ei, u32 di)
@@ -96,7 +96,11 @@ __host__ custore custore_make(shared_geometry* geom, simstate* U, real* d_U)
   store.nbfp        = core->refp.nbf3d;
   store.nvolqp      = core->refp.vqrule.n;
 
-  // volume basis function gradient evaluations
+  array<real, 2> shuffle_veval({1, 0}, core->refp.veval);
+  cudaMalloc(&store.veval_, shuffle_veval.len * sizeof(real));
+  cudaMemcpy(store.veval_, shuffle_veval.data, shuffle_veval.len * sizeof(real),
+             cudaMemcpyHostToDevice);
+
   array<real, 4> shuffle_vgrad({2, 0, 1, 3}, geom->core.vgrad_);
   cudaMalloc(&store.vgrad_, shuffle_vgrad.len * sizeof(real));
   cudaMemcpy(store.vgrad_, shuffle_vgrad.data, 
@@ -128,18 +132,18 @@ __global__ void cuda_evaluate_volume_states(real* U, custore store)
   for (u32 i = threadIdx.x; i < store.nvolqp * store.rank; i += blockDim.x)
   {
     u32 ri = i / store.nvolqp;    
-    u32 qi = i % store.nvolqp;
+    u32 qi = i - (ri * store.nvolqp);
 
     for (u32 bi = 0; bi < store.nbfp; ++bi)
     {
-      tmp += store.index_state(U, bi, ei, ri) * store.veval(qi, bi, ei);
+      tmp += store.index_state(U, bi, ei, ri) * store.veval(qi, bi);
     }
 
     store.state_veval(qi, ri, ei) = tmp;
   }
 }
 
-__global__ void cuda_evaluate_volume_gradients(real* U, custore store)
+__global__ void cuda_evaluate_interior_face_states(real* U, custore store)
 {
 }
 

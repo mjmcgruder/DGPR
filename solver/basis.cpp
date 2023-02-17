@@ -262,14 +262,14 @@ struct basis
   // quadrature points. The array format is as follows:
   //   quad nodes (ordered by "quad" structure)
   //     basis functions (ordered by lagrange_node*d functions)
-  array<real> veval;  // "volume basis function evaluation"
+  array<real, 2> veval;  // "volume basis function evaluation"
 
   // Stores the gradient of each basis function pre-evaluated at volume
   // quadrature points. The array format is as follows:
   //   each basis function (ordered by lagrange_node*d functions)
   //     each quadrature point (ordered by "quad" structure)
   //       each gradient stored [dphi_dx, dphi_dy, dphi_dz]
-  array<real> vgrad;  // "volume basis function gradient evaluation"
+  array<real, 3> vgrad;  // "volume basis function gradient evaluation"
 
   // Stores each 3D basis function evaluated at each quadrature point on each
   // face of the reference element. It's important to note that in the
@@ -283,7 +283,7 @@ struct basis
   //   each local face (in order above)
   //     each quadrature point (ordered by "quad" structure (for 2D))
   //       each basis function (ordered by lagrange_node*d functions)
-  array<real> feval;  // "face basis function evaluation"
+  array<real, 3> feval;  // "face basis function evaluation"
 
   // Stores the evaluation of each basis function evaluated at each quadrature
   // point on each face of the reference element. This array uses the same face
@@ -293,7 +293,7 @@ struct basis
   //     each basis function (ordered by lagrange_node*d functions)
   //       each quadrature point (ordered by "quad" structure (for 2D))
   //         gradient stored [d_dx, d_dy, d_dz]
-  array<real> fgrad;
+  array<real, 4> fgrad;
 
   // constructors
 
@@ -421,10 +421,10 @@ nbf3d((p + 1) * (p + 1) * (p + 1))
   vqrule =
   gauss_legendre_3d(quad_ord, quad_ord, quad_ord, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
   fqrule = gauss_legendre_2d(quad_ord, quad_ord, 0.0, 1.0, 0.0, 1.0);
-  veval  = array<real>(nbf3d * vqrule.n);
-  vgrad  = array<real>(nbf3d * vqrule.n * 3);
-  feval  = array<real>(nbf3d * fqrule.n * 6);
-  fgrad  = array<real>(nbf3d * fqrule.n * 6 * 3);
+  veval  = array<real, 2>({nbf3d, vqrule.n});
+  vgrad  = array<real, 3>({3, vqrule.n, nbf3d});
+  feval  = array<real, 3>({nbf3d, fqrule.n, 6});
+  fgrad  = array<real, 4>({3, fqrule.n, nbf3d, 6});
   pre_eval_veval();
   pre_eval_vgrad();
   pre_eval_feval();
