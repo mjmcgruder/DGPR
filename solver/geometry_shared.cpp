@@ -24,9 +24,9 @@ struct shared_geometry
 
   array<s64> interior_face_list;
   array<s64> boundary_face_list;
-  array<real> n_;
+  array<real, 3> n_;
   array<real> fJ_;
-  array<real> interior_h;
+  array<real, 2> interior_h;
   array<real> boundary_h;
 
   shared_geometry();
@@ -136,8 +136,8 @@ shared_geometry::shared_geometry(u64 sol_order, u64 geo_order, u64 nelem_x,
   interior_face_list = array<s64>(interior_face_list_size());
   boundary_face_list = array<s64>(boundary_face_list_size());
   fJ_                = array<real>(fJ_size());
-  n_                 = array<real>(n_size());
-  interior_h         = array<real>(interior_h_size());
+  n_                 = array<real, 3>({3, core.refp.fqrule.n, nface()});
+  interior_h         = array<real, 2>({2, num_interior_faces()});
   boundary_h         = array<real>(boundary_h_size());
 }
 
@@ -148,8 +148,8 @@ shared_geometry::shared_geometry(core_geometry& core_geom)
   interior_face_list = array<s64>(interior_face_list_size());
   boundary_face_list = array<s64>(boundary_face_list_size());
   fJ_                = array<real>(fJ_size());
-  n_                 = array<real>(n_size());
-  interior_h         = array<real>(interior_h_size());
+  n_                 = array<real, 3>({3, core.refp.fqrule.n, nface()});
+  interior_h         = array<real, 2>({2, num_interior_faces()});
   boundary_h         = array<real>(boundary_h_size());
 }
 

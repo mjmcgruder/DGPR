@@ -18,12 +18,16 @@
 
 #include "helper_types.cpp"
 #include "geometry_shared.cpp"
+#include "solver_params.cpp"
+#include "flux.cpp"
 
 /* struct storing pre-computes and workspace values on the device side ------ */
 
 struct custore
 {
   static constexpr u32 rank = 5;
+
+  /* counts */
 
   u32 nelem       = 0;
   u32 nbfp        = 0;
@@ -40,6 +44,10 @@ struct custore
   real* feval_ = nullptr;  // [local face [bfuncs [qpoints]]]
   real* fgrad_ = nullptr;  // [elem [local face [bfuncs [direction [qpoints]]]]]
 
+  real* n_     = nullptr;  // [face num [ dim [qpoints]]]
+  real* h_int_ = nullptr;  // [side [interior face]]
+  real* h_bnd_ = nullptr;  // [boundary face]
+
   s32* iflist = nullptr;  // [glo face, elem L, elem R, face L, face R]
   s32* bflist = nullptr;  // [glo face, elem L, bound type, face L] 
 
@@ -51,6 +59,10 @@ struct custore
   real* state_ifgrad_ = nullptr;
   real* state_bfeval_ = nullptr;
   real* state_bfgrad_ = nullptr;
+
+  real* flux_vol_ = nullptr;
+  real* flux_int_ = nullptr;
+  real* flux_bnd_ = nullptr;
 
   /* indexing */
 
@@ -110,6 +122,41 @@ struct custore
     return state_bfgrad_[nfacqp * (3 * (rank * fi + ri) + di) + qi];
   }
 
+  __forceinline__ __device__ real& n(u32 qi, u32 di, u32 gfi)
+  {
+    return n_[nfacqp * (3 * gfi + di) + qi];
+  }
+
+  __forceinline__ __device__ real& h_int(u32 ifi, u32 si)
+  {
+    return h_int_[niface * si + ifi];
+  }
+
+  __forceinline__ __device__ real& h_bnd(u32 bfi)
+  {
+    return h_bnd_[bfi];
+  }
+
+  // Uses "vector iterator" vi
+
+  // vectors are stored in this order: Fx Fy Fz Qx Qy Qz
+  __forceinline__ __device__  real& flux_vol(u32 qi, u32 vi, u32 ri, u32 ei)
+  {
+    return flux_vol_[nvolqp * (6 * (rank * ei + ri) + vi) + qi];
+  }
+
+  // vectors stored in this order: F dcQLx dcQLy dcQLz dcQRx dcQRy dcQRz Qh
+  __forceinline__ __device__ real& flux_int(u32 qi, u32 vi, u32 ri, u32 fi)
+  {
+    return flux_int_[nfacqp * (8 * (rank * fi + ri) + vi) + qi];
+  }
+
+  // vectors stored in this order: F dcQLx dcQLy dcQLz Qh
+  __forceinline__ __device__ real& flux_bnd(u32 qi, u32 vi, u32 ri, u32 fi)
+  {
+    return flux_bnd_[nfacqp * (5 * (rank * fi + ri) + vi) + qi];
+  }
+
   /* sizing */
 
   __host__ u32 size_state_veval() const
@@ -141,6 +188,21 @@ struct custore
   {
     return size_state_bfeval() * 3;
   }
+
+  __host__ u32 size_flux_vol() const
+  {
+    return nvolqp * rank * 6 * nelem;
+  }
+
+  __host__ u32 size_flux_int() const
+  {
+    return nfacqp * rank * 8 * niface;
+  }
+
+  __host__ u32 size_flux_bnd() const
+  {
+    return nfacqp * rank * 5 * nbface;
+  }
 };
 
 __host__ custore custore_make(shared_geometry* geom, simstate* U, real* d_U)
@@ -152,7 +214,7 @@ __host__ custore custore_make(shared_geometry* geom, simstate* U, real* d_U)
 
   cudaMemcpy(d_U, U->U.data, U->U.len * sizeof(real), cudaMemcpyHostToDevice);
 
-  /* initialize pre-computes */
+  /* initialize counts */
 
   store.solarr_size = U->size();
   store.nelem       = core->nelem;
@@ -161,6 +223,8 @@ __host__ custore custore_make(shared_geometry* geom, simstate* U, real* d_U)
   store.nfacqp      = core->refp.fqrule.n;
   store.niface      = geom->num_interior_faces();
   store.nbface      = geom->num_boundary_faces();
+
+  /* initialize pre-computes */
 
   array<real, 2> shuffle_veval({1, 0}, core->refp.veval);
   cudaMalloc(&store.veval_, shuffle_veval.len * sizeof(real));
@@ -196,14 +260,31 @@ __host__ custore custore_make(shared_geometry* geom, simstate* U, real* d_U)
   cudaMemcpy(store.bflist, bflist.data, bflist.len * sizeof(s32),
              cudaMemcpyHostToDevice);
 
+  array<real, 3> shuffle_n({1, 0, 2}, geom->n_);
+  cudaMalloc(&store.n_, shuffle_n.len * sizeof(real));
+  cudaMemcpy(store.n_, shuffle_n.data, shuffle_n.len * sizeof(real),
+             cudaMemcpyHostToDevice);
+
+  array<real, 2> shuffle_h_int({1, 0}, geom->interior_h);
+  cudaMalloc(&store.h_int_, shuffle_h_int.len * sizeof(real));
+  cudaMemcpy(store.h_int_, shuffle_h_int.data, shuffle_h_int.len * sizeof(real),
+             cudaMemcpyHostToDevice);
+
+  cudaMalloc(&store.h_bnd_, geom->boundary_h.len * sizeof(real));
+  cudaMemcpy(store.h_bnd_, geom->boundary_h.data,
+             geom->boundary_h.len * sizeof(real), cudaMemcpyHostToDevice);
+
   /* allocate (and initialize?) workspace */
 
-  cudaMalloc(&store.state_veval_, store.size_state_veval() * sizeof(real));
-  cudaMalloc(&store.state_vgrad_, store.size_state_vgrad() * sizeof(real));
+  cudaMalloc(&store.state_veval_,  store.size_state_veval()  * sizeof(real));
+  cudaMalloc(&store.state_vgrad_,  store.size_state_vgrad()  * sizeof(real));
   cudaMalloc(&store.state_ifeval_, store.size_state_ifeval() * sizeof(real));
   cudaMalloc(&store.state_ifgrad_, store.size_state_ifgrad() * sizeof(real));
   cudaMalloc(&store.state_bfeval_, store.size_state_bfeval() * sizeof(real));
   cudaMalloc(&store.state_bfgrad_, store.size_state_bfgrad() * sizeof(real));
+  cudaMalloc(&store.flux_vol_,     store.size_flux_vol()     * sizeof(real));
+  cudaMalloc(&store.flux_int_,     store.size_flux_int()     * sizeof(real));
+  cudaMalloc(&store.flux_bnd_,     store.size_flux_bnd()     * sizeof(real));
 
   return store;
 }
@@ -214,6 +295,9 @@ __host__ void custore_free(custore* store)
   cudaFree(store->vgrad_);
   cudaFree(store->feval_);
   cudaFree(store->fgrad_);
+  cudaFree(store->n_);
+  cudaFree(store->h_int_);
+  cudaFree(store->h_bnd_);
   cudaFree(store->iflist);
   cudaFree(store->bflist);
   cudaFree(store->state_veval_);
@@ -222,6 +306,9 @@ __host__ void custore_free(custore* store)
   cudaFree(store->state_ifgrad_);
   cudaFree(store->state_bfeval_);
   cudaFree(store->state_bfgrad_);
+  cudaFree(store->flux_vol_);
+  cudaFree(store->flux_int_);
+  cudaFree(store->flux_bnd_);
 }
 
 /* residual and related kernels --------------------------------------------- */
@@ -320,6 +407,306 @@ __global__ void cuda_evaluate_boundary_face_states(real* U, custore store)
     store.state_bfgrad(qi, 0, ri, fi) = tmp_dxL;
     store.state_bfgrad(qi, 1, ri, fi) = tmp_dyL;
     store.state_bfgrad(qi, 2, ri, fi) = tmp_dzL;
+  }
+}
+
+__global__ void cuda_evaluate_interior_flux(custore store, parameters params)
+{
+  u32 tid         = blockDim.x * blockIdx.x + threadIdx.x;
+  u32 stride      = blockDim.x * gridDim.x;
+  u32 num_glob_qp = store.nelem * store.nvolqp;
+
+  for (u32 i = tid; i < num_glob_qp; i += stride)
+  {
+    u32 ei = i / store.nvolqp; 
+    u32 qi = i - (ei * store.nvolqp);
+
+    real S[5], Sx[5], Sy[5], Sz[5];
+
+    S[0] = store.state_veval(qi, 0, ei);
+    S[1] = store.state_veval(qi, 1, ei);
+    S[2] = store.state_veval(qi, 2, ei);
+    S[3] = store.state_veval(qi, 3, ei);
+    S[4] = store.state_veval(qi, 4, ei);
+
+    Sx[0] = store.state_vgrad(qi, 0, 0, ei);
+    Sx[1] = store.state_vgrad(qi, 0, 1, ei);
+    Sx[2] = store.state_vgrad(qi, 0, 2, ei);
+    Sx[3] = store.state_vgrad(qi, 0, 3, ei);
+    Sx[4] = store.state_vgrad(qi, 0, 4, ei);
+
+    Sy[0] = store.state_vgrad(qi, 1, 0, ei);
+    Sy[1] = store.state_vgrad(qi, 1, 1, ei);
+    Sy[2] = store.state_vgrad(qi, 1, 2, ei);
+    Sy[3] = store.state_vgrad(qi, 1, 3, ei);
+    Sy[4] = store.state_vgrad(qi, 1, 4, ei);
+
+    Sx[0] = store.state_vgrad(qi, 2, 0, ei);
+    Sx[1] = store.state_vgrad(qi, 2, 1, ei);
+    Sx[2] = store.state_vgrad(qi, 2, 2, ei);
+    Sx[3] = store.state_vgrad(qi, 2, 3, ei);
+    Sx[4] = store.state_vgrad(qi, 2, 4, ei);
+
+    real Fx[5], Fy[5], Fz[5];
+    real Qx[5], Qy[5], Qz[5];
+    analytical_flux(S, params.gamma, Fx, Fy, Fz);
+    A(S, Sx, Sy, Sz, params.mu, Qx, Qy, Qz);
+
+    store.flux_vol(qi, 0, 0, ei) = Fx[0];
+    store.flux_vol(qi, 0, 1, ei) = Fx[1];
+    store.flux_vol(qi, 0, 2, ei) = Fx[2];
+    store.flux_vol(qi, 0, 3, ei) = Fx[3];
+    store.flux_vol(qi, 0, 4, ei) = Fx[4];
+
+    store.flux_vol(qi, 1, 0, ei) = Fy[0];
+    store.flux_vol(qi, 1, 1, ei) = Fy[1];
+    store.flux_vol(qi, 1, 2, ei) = Fy[2];
+    store.flux_vol(qi, 1, 3, ei) = Fy[3];
+    store.flux_vol(qi, 1, 4, ei) = Fy[4];
+
+    store.flux_vol(qi, 2, 0, ei) = Fz[0];
+    store.flux_vol(qi, 2, 1, ei) = Fz[1];
+    store.flux_vol(qi, 2, 2, ei) = Fz[2];
+    store.flux_vol(qi, 2, 3, ei) = Fz[3];
+    store.flux_vol(qi, 2, 4, ei) = Fz[4];
+
+    store.flux_vol(qi, 3, 0, ei) = Qx[0];
+    store.flux_vol(qi, 3, 1, ei) = Qx[1];
+    store.flux_vol(qi, 3, 2, ei) = Qx[2];
+    store.flux_vol(qi, 3, 3, ei) = Qx[3];
+    store.flux_vol(qi, 3, 4, ei) = Qx[4];
+
+    store.flux_vol(qi, 4, 0, ei) = Qy[0];
+    store.flux_vol(qi, 4, 1, ei) = Qy[1];
+    store.flux_vol(qi, 4, 2, ei) = Qy[2];
+    store.flux_vol(qi, 4, 3, ei) = Qy[3];
+    store.flux_vol(qi, 4, 4, ei) = Qy[4];
+
+    store.flux_vol(qi, 5, 0, ei) = Qz[0];
+    store.flux_vol(qi, 5, 1, ei) = Qz[1];
+    store.flux_vol(qi, 5, 2, ei) = Qz[2];
+    store.flux_vol(qi, 5, 3, ei) = Qz[3];
+    store.flux_vol(qi, 5, 4, ei) = Qz[4];
+  }
+}
+
+__global__ void cuda_evaluate_interior_face_flux(custore store,
+                                                 parameters params)
+{
+  u32 tid         = blockDim.x * blockIdx.x + threadIdx.x;
+  u32 num_glob_qp = store.niface * store.nfacqp;
+  u32 stride      = gridDim.x * blockDim.x;
+
+  for (u32 i = tid; i < num_glob_qp; i += stride)
+  {
+    u32 fi  = i / store.nfacqp;
+    u32 qi  = i - (fi * store.nfacqp);
+    u32 gfi = store.iflist[5 * fi + 0];
+
+    float SL[5], SR[5];
+    float SLx[5], SLy[5], SLz[5], SRx[5], SRy[5], SRz[5];
+
+    float n[3];
+    n[0] = store.n(qi, 0, gfi);
+    n[1] = store.n(qi, 1, gfi);
+    n[2] = store.n(qi, 2, gfi);
+
+    SL[0] = store.state_ifeval(qi, 0, 0, fi); 
+    SL[1] = store.state_ifeval(qi, 1, 0, fi); 
+    SL[2] = store.state_ifeval(qi, 2, 0, fi); 
+    SL[3] = store.state_ifeval(qi, 3, 0, fi); 
+    SL[4] = store.state_ifeval(qi, 4, 0, fi); 
+
+    SR[0] = store.state_ifeval(qi, 0, 1, fi); 
+    SR[1] = store.state_ifeval(qi, 1, 1, fi); 
+    SR[2] = store.state_ifeval(qi, 2, 1, fi); 
+    SR[3] = store.state_ifeval(qi, 3, 1, fi); 
+    SR[4] = store.state_ifeval(qi, 4, 1, fi); 
+
+    SLx[0] = store.state_ifgrad(qi, 0, 0, 0, fi);
+    SLx[1] = store.state_ifgrad(qi, 0, 1, 0, fi);
+    SLx[2] = store.state_ifgrad(qi, 0, 2, 0, fi);
+    SLx[3] = store.state_ifgrad(qi, 0, 3, 0, fi);
+    SLx[4] = store.state_ifgrad(qi, 0, 4, 0, fi);
+
+    SLy[0] = store.state_ifgrad(qi, 1, 0, 0, fi);
+    SLy[1] = store.state_ifgrad(qi, 1, 1, 0, fi);
+    SLy[2] = store.state_ifgrad(qi, 1, 2, 0, fi);
+    SLy[3] = store.state_ifgrad(qi, 1, 3, 0, fi);
+    SLy[4] = store.state_ifgrad(qi, 1, 4, 0, fi);
+    
+    SLz[0] = store.state_ifgrad(qi, 2, 0, 0, fi);
+    SLz[1] = store.state_ifgrad(qi, 2, 1, 0, fi);
+    SLz[2] = store.state_ifgrad(qi, 2, 2, 0, fi);
+    SLz[3] = store.state_ifgrad(qi, 2, 3, 0, fi);
+    SLz[4] = store.state_ifgrad(qi, 2, 4, 0, fi);
+
+    SRx[0] = store.state_ifgrad(qi, 0, 0, 1, fi);
+    SRx[1] = store.state_ifgrad(qi, 0, 1, 1, fi);
+    SRx[2] = store.state_ifgrad(qi, 0, 2, 1, fi);
+    SRx[3] = store.state_ifgrad(qi, 0, 3, 1, fi);
+    SRx[4] = store.state_ifgrad(qi, 0, 4, 1, fi);
+
+    SRy[0] = store.state_ifgrad(qi, 1, 0, 1, fi);
+    SRy[1] = store.state_ifgrad(qi, 1, 1, 1, fi);
+    SRy[2] = store.state_ifgrad(qi, 1, 2, 1, fi);
+    SRy[3] = store.state_ifgrad(qi, 1, 3, 1, fi);
+    SRy[4] = store.state_ifgrad(qi, 1, 4, 1, fi);
+    
+    SRz[0] = store.state_ifgrad(qi, 2, 0, 1, fi);
+    SRz[1] = store.state_ifgrad(qi, 2, 1, 1, fi);
+    SRz[2] = store.state_ifgrad(qi, 2, 2, 1, fi);
+    SRz[3] = store.state_ifgrad(qi, 2, 3, 1, fi);
+    SRz[4] = store.state_ifgrad(qi, 2, 4, 1, fi);
+
+    /* inviscid flux term */
+
+    real F[5];
+    real dcQLx[5], dcQLy[5], dcQLz[5];
+    real dcQRx[5], dcQRy[5], dcQRz[5];
+    real Qh[5];
+
+    {
+      float smax;
+      roe(SL, SR, n, params.gamma, F, &smax);
+    }
+
+    /* dual consistency term */
+
+    {
+      float Sh[5];
+      for (u32 ri = 0; ri < 5; ++ri)
+        Sh[ri] = 0.5 * (SL[ri] + SR[ri]);
+
+      float dL[5], dR[5];
+      for (u32 ri = 0; ri < 5; ++ri)
+      {
+        dL[ri] = SL[ri] - Sh[ri];
+        dR[ri] = SR[ri] - Sh[ri];
+      }
+
+      float dLnx[5], dLny[5], dLnz[5], dRnx[5], dRny[5], dRnz[5];
+      for (u32 ri = 0; ri < 5; ++ri)
+      {
+        dLnx[ri] = dL[ri] * n[0];
+        dLny[ri] = dL[ri] * n[1];
+        dLnz[ri] = dL[ri] * n[2];
+
+        dRnx[ri] = dR[ri] * -n[0];
+        dRny[ri] = dR[ri] * -n[1];
+        dRnz[ri] = dR[ri] * -n[2];
+      }
+
+      A(SL, dLnx, dLny, dLnz, params.mu, dcQLx, dcQLy, dcQLz);
+      A(SR, dRnx, dRny, dRnz, params.mu, dcQRx, dcQRy, dcQRz);
+    }
+
+    /* viscous flux term */
+
+    {
+      float dLx[5] = {}, dLy[5] = {}, dLz[5] = {};
+      float dRx[5] = {}, dRy[5] = {}, dRz[5] = {};
+
+      float diffL[5], diffR[5];
+      for (u32 ri = 0; ri < 5; ++ri)
+      {
+        diffL[ri] = SL[ri] - SR[ri];
+        diffR[ri] = SR[ri] - SL[ri];
+      }
+
+      float DLNx[5], DLNy[5], DLNz[5], DRNx[5], DRNy[5], DRNz[5];
+      for (u32 ri = 0; ri < 5; ++ri)
+      {
+        DLNx[ri] = diffL[ri] * n[0];
+        DLNy[ri] = diffL[ri] * n[1];
+        DLNz[ri] = diffL[ri] * n[2];
+
+        DRNx[ri] = diffR[ri] * -n[0];
+        DRNy[ri] = diffR[ri] * -n[1];
+        DRNz[ri] = diffR[ri] * -n[2];
+      }
+
+      float QLx[5], QLy[5], QLz[5], QRx[5], QRy[5], QRz[5];
+      A(SL, DLNx, DLNy, DLNz, params.mu, QLx, QLy, QLz);
+      A(SR, DRNx, DRNy, DRNz, params.mu, QRx, QRy, QRz);
+
+      float hL = 1.f / store.h_int(fi, 0);
+      float hR = 1.f / store.h_int(fi, 1);
+      for (u32 ri = 0; ri < 5; ++ri)
+      {
+        dLx[ri] = hL * QLx[ri];
+        dLy[ri] = hL * QLy[ri];
+        dLz[ri] = hL * QLz[ri];
+        dRx[ri] = hR * QRx[ri];
+        dRy[ri] = hR * QRy[ri];
+        dRz[ri] = hR * QRz[ri];
+      }
+
+      A(SL, SLx, SLy, SLz, params.mu, QLx, QLy, QLz);
+      A(SR, SRx, SRy, SRz, params.mu, QRx, QRy, QRz);
+
+      float QHx[5], QHy[5], QHz[5];
+      for (u32 ri = 0; ri < 5; ++ri)
+      {
+        QHx[ri] =
+        0.5 * (QLx[ri] + QRx[ri]) - params.eta * 0.5 * (dLx[ri] + dRx[ri]);
+        QHy[ri] =
+        0.5 * (QLy[ri] + QRy[ri]) - params.eta * 0.5 * (dLy[ri] + dRy[ri]);
+        QHz[ri] =
+        0.5 * (QLz[ri] + QRz[ri]) - params.eta * 0.5 * (dLz[ri] + dRz[ri]);
+      }
+
+      for (u32 ri = 0; ri < 5; ++ri)
+        Qh[5 * qi + ri] = QHx[ri] * n[0] + QHy[ri] * n[1] + QHz[ri] * n[2];
+    }
+
+    store.flux_int(qi, 0, 0, fi) = F[0];
+    store.flux_int(qi, 0, 1, fi) = F[1];
+    store.flux_int(qi, 0, 2, fi) = F[2];
+    store.flux_int(qi, 0, 3, fi) = F[3];
+    store.flux_int(qi, 0, 4, fi) = F[4];
+
+    store.flux_int(qi, 1, 0, fi) = dcQLx[0];
+    store.flux_int(qi, 1, 1, fi) = dcQLx[1];
+    store.flux_int(qi, 1, 2, fi) = dcQLx[2];
+    store.flux_int(qi, 1, 3, fi) = dcQLx[3];
+    store.flux_int(qi, 1, 4, fi) = dcQLx[4];
+
+    store.flux_int(qi, 2, 0, fi) = dcQLy[0];
+    store.flux_int(qi, 2, 1, fi) = dcQLy[1];
+    store.flux_int(qi, 2, 2, fi) = dcQLy[2];
+    store.flux_int(qi, 2, 3, fi) = dcQLy[3];
+    store.flux_int(qi, 2, 4, fi) = dcQLy[4];
+
+    store.flux_int(qi, 3, 0, fi) = dcQLz[0];
+    store.flux_int(qi, 3, 1, fi) = dcQLz[1];
+    store.flux_int(qi, 3, 2, fi) = dcQLz[2];
+    store.flux_int(qi, 3, 3, fi) = dcQLz[3];
+    store.flux_int(qi, 3, 4, fi) = dcQLz[4];
+
+    store.flux_int(qi, 4, 0, fi) = dcQRx[0];
+    store.flux_int(qi, 4, 1, fi) = dcQRx[1];
+    store.flux_int(qi, 4, 2, fi) = dcQRx[2];
+    store.flux_int(qi, 4, 3, fi) = dcQRx[3];
+    store.flux_int(qi, 4, 4, fi) = dcQRx[4];
+
+    store.flux_int(qi, 5, 0, fi) = dcQRy[0];
+    store.flux_int(qi, 5, 1, fi) = dcQRy[1];
+    store.flux_int(qi, 5, 2, fi) = dcQRy[2];
+    store.flux_int(qi, 5, 3, fi) = dcQRy[3];
+    store.flux_int(qi, 5, 4, fi) = dcQRy[4];
+
+    store.flux_int(qi, 6, 0, fi) = dcQRz[0];
+    store.flux_int(qi, 6, 1, fi) = dcQRz[1];
+    store.flux_int(qi, 6, 2, fi) = dcQRz[2];
+    store.flux_int(qi, 6, 3, fi) = dcQRz[3];
+    store.flux_int(qi, 6, 4, fi) = dcQRz[4];
+
+    store.flux_int(qi, 7, 0, fi) = Qh[0];
+    store.flux_int(qi, 7, 1, fi) = Qh[1];
+    store.flux_int(qi, 7, 2, fi) = Qh[2];
+    store.flux_int(qi, 7, 3, fi) = Qh[3];
+    store.flux_int(qi, 7, 4, fi) = Qh[4];
   }
 }
 
