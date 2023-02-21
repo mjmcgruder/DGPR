@@ -40,10 +40,15 @@ struct custore
 
   /* pre-computes */
 
-  real* veval_ = nullptr;  // [bfuncs [qpoints]]
-  real* vgrad_ = nullptr;  // [elems [bfuncs [direction [qpoints]]]]
-  real* feval_ = nullptr;  // [local face [bfuncs [qpoints]]]
-  real* fgrad_ = nullptr;  // [elem [local face [bfuncs [direction [qpoints]]]]]
+  real* veval_  = nullptr;  // [bfuncs [qpoints]]
+  real* vgrad_  = nullptr;  // [elems [bfuncs [direction [qpoints]]]]
+  real* feval_  = nullptr;  // [local face [bfuncs [qpoints]]]
+  real* fgrad_  = nullptr;  // [elem [local face [bfuncs [direction [qpoints]]]]]
+
+  real* vquadw_ = nullptr;  // [qpoints]
+  real* fquadw_ = nullptr;  // [qpoints]
+  real* vJ_     = nullptr;  // [elem [qpoints]]
+  real* fJ_     = nullptr;  // [face (global) [qpoint]]
 
   real* n_     = nullptr;  // [face num [ dim [qpoints]]]
   real* h_int_ = nullptr;  // [side [interior face]]
@@ -64,6 +69,8 @@ struct custore
   real* flux_vol_ = nullptr;
   real* flux_int_ = nullptr;
   real* flux_bnd_ = nullptr;
+
+  real* integral_face_ = nullptr;
 
   /* indexing */
 
@@ -138,6 +145,32 @@ struct custore
     return h_bnd_[bfi];
   }
 
+  __forceinline__ __device__ real& vquadw(u32 qi)
+  {
+    return vquadw_[qi];
+  }
+
+  __forceinline__ __device__ real& fquadw(u32 qi)
+  {
+    return fquadw_[qi];
+  }
+
+  __forceinline__ __device__ real& vJ(u32 qi, u32 ei)
+  {
+    return vJ_[nvolqp * (ei) + qi];
+  }
+
+  __forceinline__ __device__ real& fJ(u32 qi, u32 gfi)
+  {
+    return fJ_[nfacqp * gfi + qi];
+  }
+
+  __forceinline__ __device__ real& integral_face(u32 ti, u32 ri, u32 lfi,
+                                                 u32 ei)
+  {
+    return integral_face_[nbfp * (rank * (6 * ei + lfi) + ri) + ti];
+  }
+
   // Uses "vector iterator" vi
 
   // vectors are stored in this order: Fx Fy Fz Qx Qy Qz
@@ -203,6 +236,11 @@ struct custore
   __host__ u32 size_flux_bnd() const
   {
     return nfacqp * rank * 5 * nbface;
+  }
+
+  __host__ u32 size_integral_face() const
+  {
+    return nelem * 6 * rank * nbfp;
   }
 };
 
@@ -275,17 +313,34 @@ __host__ custore custore_make(shared_geometry* geom, simstate* U, real* d_U)
   cudaMemcpy(store.h_bnd_, geom->boundary_h.data,
              geom->boundary_h.len * sizeof(real), cudaMemcpyHostToDevice);
 
+  cudaMalloc(&store.vquadw_, core->refp.vqrule.w.len * sizeof(real));
+  cudaMemcpy(store.vquadw_, core->refp.vqrule.w.data,
+             core->refp.vqrule.w.len * sizeof(real), cudaMemcpyHostToDevice);
+
+  cudaMalloc(&store.fquadw_, core->refp.fqrule.w.len * sizeof(real));
+  cudaMemcpy(store.fquadw_, core->refp.fqrule.w.data,
+             core->refp.fqrule.w.len * sizeof(real), cudaMemcpyHostToDevice);
+
+  cudaMalloc(&store.vJ_, core->vJ_.len * sizeof(real));
+  cudaMemcpy(store.vJ_, core->vJ_.data, core->vJ_.len * sizeof(real),
+             cudaMemcpyHostToDevice);
+
+  cudaMalloc(&store.fJ_, geom->fJ_.len * sizeof(real));
+  cudaMemcpy(store.fJ_, geom->fJ_.data, geom->fJ_.len * sizeof(real),
+             cudaMemcpyHostToDevice);
+
   /* allocate (and initialize?) workspace */
 
-  cudaMalloc(&store.state_veval_,  store.size_state_veval()  * sizeof(real));
-  cudaMalloc(&store.state_vgrad_,  store.size_state_vgrad()  * sizeof(real));
-  cudaMalloc(&store.state_ifeval_, store.size_state_ifeval() * sizeof(real));
-  cudaMalloc(&store.state_ifgrad_, store.size_state_ifgrad() * sizeof(real));
-  cudaMalloc(&store.state_bfeval_, store.size_state_bfeval() * sizeof(real));
-  cudaMalloc(&store.state_bfgrad_, store.size_state_bfgrad() * sizeof(real));
-  cudaMalloc(&store.flux_vol_,     store.size_flux_vol()     * sizeof(real));
-  cudaMalloc(&store.flux_int_,     store.size_flux_int()     * sizeof(real));
-  cudaMalloc(&store.flux_bnd_,     store.size_flux_bnd()     * sizeof(real));
+  cudaMalloc(&store.state_veval_,   store.size_state_veval()   * sizeof(real));
+  cudaMalloc(&store.state_vgrad_,   store.size_state_vgrad()   * sizeof(real));
+  cudaMalloc(&store.state_ifeval_,  store.size_state_ifeval()  * sizeof(real));
+  cudaMalloc(&store.state_ifgrad_,  store.size_state_ifgrad()  * sizeof(real));
+  cudaMalloc(&store.state_bfeval_,  store.size_state_bfeval()  * sizeof(real));
+  cudaMalloc(&store.state_bfgrad_,  store.size_state_bfgrad()  * sizeof(real));
+  cudaMalloc(&store.flux_vol_,      store.size_flux_vol()      * sizeof(real));
+  cudaMalloc(&store.flux_int_,      store.size_flux_int()      * sizeof(real));
+  cudaMalloc(&store.flux_bnd_,      store.size_flux_bnd()      * sizeof(real));
+  cudaMalloc(&store.integral_face_, store.size_integral_face() * sizeof(real));
 
   return store;
 }
@@ -296,6 +351,10 @@ __host__ void custore_free(custore* store)
   cudaFree(store->vgrad_);
   cudaFree(store->feval_);
   cudaFree(store->fgrad_);
+  cudaFree(store->vquadw_);
+  cudaFree(store->fquadw_);
+  cudaFree(store->vJ_);
+  cudaFree(store->fJ_);
   cudaFree(store->n_);
   cudaFree(store->h_int_);
   cudaFree(store->h_bnd_);
@@ -310,6 +369,7 @@ __host__ void custore_free(custore* store)
   cudaFree(store->flux_vol_);
   cudaFree(store->flux_int_);
   cudaFree(store->flux_bnd_);
+  cudaFree(store->integral_face_);
 }
 
 /* residual and related kernels --------------------------------------------- */
@@ -745,17 +805,17 @@ __global__ void cuda_evaluate_boundary_face_flux(custore store,
     SLx[3] = store.state_bfgrad(qi, 0, 3, fi);
     SLx[4] = store.state_bfgrad(qi, 0, 4, fi);
 
-    SLx[0] = store.state_bfgrad(qi, 1, 0, fi);
-    SLx[1] = store.state_bfgrad(qi, 1, 1, fi);
-    SLx[2] = store.state_bfgrad(qi, 1, 2, fi);
-    SLx[3] = store.state_bfgrad(qi, 1, 3, fi);
-    SLx[4] = store.state_bfgrad(qi, 1, 4, fi);
+    SLy[0] = store.state_bfgrad(qi, 1, 0, fi);
+    SLy[1] = store.state_bfgrad(qi, 1, 1, fi);
+    SLy[2] = store.state_bfgrad(qi, 1, 2, fi);
+    SLy[3] = store.state_bfgrad(qi, 1, 3, fi);
+    SLy[4] = store.state_bfgrad(qi, 1, 4, fi);
 
-    SLx[0] = store.state_bfgrad(qi, 2, 0, fi);
-    SLx[1] = store.state_bfgrad(qi, 2, 1, fi);
-    SLx[2] = store.state_bfgrad(qi, 2, 2, fi);
-    SLx[3] = store.state_bfgrad(qi, 2, 3, fi);
-    SLx[4] = store.state_bfgrad(qi, 2, 4, fi);
+    SLz[0] = store.state_bfgrad(qi, 2, 0, fi);
+    SLz[1] = store.state_bfgrad(qi, 2, 1, fi);
+    SLz[2] = store.state_bfgrad(qi, 2, 2, fi);
+    SLz[3] = store.state_bfgrad(qi, 2, 3, fi);
+    SLz[4] = store.state_bfgrad(qi, 2, 4, fi);
 
     switch (bound_type)
     {
@@ -904,6 +964,153 @@ __global__ void cuda_evaluate_boundary_face_flux(custore store,
     store.flux_bnd(qi, 4, 2, fi) = Qh[2];
     store.flux_bnd(qi, 4, 3, fi) = Qh[3];
     store.flux_bnd(qi, 4, 4, fi) = Qh[4];
+  }
+}
+
+__global__ void cuda_accumulate_interior_residual(custore store, real* R)
+{
+  u32 ei = blockIdx.x;
+
+  for (u32 i = threadIdx.x; i < store.nbfp * store.rank; i += blockDim.x)
+  {
+    u32 ri = i / store.nbfp;
+    u32 ti = i - (ri * store.nbfp);
+
+    real residual = 0.;
+    for (u32 qi = 0; qi < store.nvolqp; ++qi)
+    {
+      real qw = store.vquadw(qi);
+      real J  = store.vJ(qi, ei);
+
+      real tgrad0 = store.vgrad(qi, ti, ei, 0);
+      real tgrad1 = store.vgrad(qi, ti, ei, 1);
+      real tgrad2 = store.vgrad(qi, ti, ei, 2);
+
+      real Fx = store.flux_vol(qi, 0, ri, ei);
+      real Fy = store.flux_vol(qi, 1, ri, ei);
+      real Fz = store.flux_vol(qi, 2, ri, ei);
+      real Qx = store.flux_vol(qi, 3, ri, ei);
+      real Qy = store.flux_vol(qi, 4, ri, ei);
+      real Qz = store.flux_vol(qi, 5, ri, ei);
+
+      residual +=
+      (tgrad0 * (Qx - Fx) + tgrad1 * (Qy - Fy) + tgrad2 * (Qz - Fz)) * (J * qw);
+    }
+
+    store.index_state(R, ti, ri, ei) += residual;
+  }
+}
+
+__global__ void cuda_evaluate_interior_face_residuals(custore store)
+{
+  u32 fi = blockIdx.x;
+
+  for (u32 i = threadIdx.x; i < store.nbfp * store.rank; i += blockDim.x)
+  {
+    u32 ri = i / store.nbfp;
+    u32 ti = i - (ri * store.nbfp);
+
+    s32 gfi = store.iflist[5 * fi + 0];
+    s32 eL  = store.iflist[5 * fi + 1];
+    s32 eR  = store.iflist[5 * fi + 2];
+    s32 lfL = store.iflist[5 * fi + 3];
+    s32 lfR = store.iflist[5 * fi + 4];
+
+    real residualL = 0.;
+    real residualR = 0.;
+    for (u32 qi = 0; qi < store.nfacqp; ++qi)
+    {
+      real J   = store.fJ(qi, gfi);
+      real qw  = store.fquadw(qi);
+      real tfL = store.feval(qi, ti, lfL);
+      real tfR = store.feval(qi, ti, lfR);
+
+      real tgLx = store.fgrad(qi, 0, ti, lfL, eL);
+      real tgLy = store.fgrad(qi, 1, ti, lfL, eL);
+      real tgLz = store.fgrad(qi, 2, ti, lfL, eL);
+
+      real tgRx = store.fgrad(qi, 0, ti, lfR, eR);
+      real tgRy = store.fgrad(qi, 1, ti, lfR, eR);
+      real tgRz = store.fgrad(qi, 2, ti, lfR, eR);
+
+      real F     = store.flux_int(qi, 0, ri, fi);
+      real dcQLx = store.flux_int(qi, 1, ri, fi);
+      real dcQLy = store.flux_int(qi, 2, ri, fi);
+      real dcQLz = store.flux_int(qi, 3, ri, fi);
+      real dcQRx = store.flux_int(qi, 4, ri, fi);
+      real dcQRy = store.flux_int(qi, 5, ri, fi);
+      real dcQRz = store.flux_int(qi, 6, ri, fi);
+      real Qh    = store.flux_int(qi, 7, ri, fi);
+
+      residualL +=
+      (+(tfL * F) - (tgLx * dcQLx + tgLy * dcQLy + tgLz * dcQLz) - (tfL * Qh)) *
+      (J * qw);
+      residualR +=
+      (-(tfR * F) + (tgRx * dcQRx + tgRy * dcQRy + tgRz * dcQRz) + (tfR * Qh)) *
+      (J * qw);
+    }
+
+    store.integral_face(ti, ri, lfL, eL) = residualL;
+    store.integral_face(ti, ri, lfR, eR) = residualR;
+  }
+}
+
+__global__ void cuda_evaluate_boundary_face_residuals(custore store)
+{
+  u32 fi = blockIdx.x;
+
+  for (u32 i = threadIdx.x; i < store.nbfp * store.rank; i += blockDim.x)
+  {
+    u32 ri = i / store.nbfp;
+    u32 ti = i - (ri * store.nbfp);
+
+    s32 gfi = store.bflist[4 * fi + 0];
+    s32 eL  = store.bflist[4 * fi + 1];
+    s32 lfL = store.bflist[4 * fi + 3];
+
+    real residualL = 0.;
+    for (u32 qi = 0; qi < store.nfacqp; ++qi)
+    {
+      real J   = store.fJ(qi, gfi);
+      real qw  = store.fquadw(qi);
+      real tfL = store.feval(qi, ti, lfL);
+
+      real tgLx = store.fgrad(qi, 0, ti, lfL, eL);
+      real tgLy = store.fgrad(qi, 1, ti, lfL, eL);
+      real tgLz = store.fgrad(qi, 2, ti, lfL, eL);
+
+      real F     = store.flux_bnd(qi, 0, ri, fi);
+      real dcQLx = store.flux_bnd(qi, 1, ri, fi);
+      real dcQLy = store.flux_bnd(qi, 2, ri, fi);
+      real dcQLz = store.flux_bnd(qi, 3, ri, fi);
+      real Qh    = store.flux_bnd(qi, 4, ri, fi);
+
+      residualL +=
+      (+(tfL * F) - (tgLx * dcQLx + tgLy * dcQLy + tgLz * dcQLz) - (tfL * Qh)) *
+      (J * qw);
+    }
+
+    store.integral_face(ti, ri, lfL, eL);
+  }
+}
+
+__global__ void cuda_accumulate_face_residuals(custore store, real* R)
+{
+  u32 tid = blockDim.x * blockIdx.x + threadIdx.x;
+
+  for (u32 i = tid; i < store.nelem * store.rank * store.nbfp;
+       i += gridDim.x * blockDim.x)
+  {
+    u32 ei = i / (store.rank * store.nbfp);
+    u32 ri = (i - (ei * store.rank * store.nbfp)) / store.nbfp;
+    u32 ti = i - (ei * store.rank * store.nbfp) - (ri * store.nbfp);
+
+    store.index_state(R, ti, ri, ei) += store.integral_face(ti, ri, 0, ei);
+    store.index_state(R, ti, ri, ei) += store.integral_face(ti, ri, 1, ei);
+    store.index_state(R, ti, ri, ei) += store.integral_face(ti, ri, 2, ei);
+    store.index_state(R, ti, ri, ei) += store.integral_face(ti, ri, 3, ei);
+    store.index_state(R, ti, ri, ei) += store.integral_face(ti, ri, 4, ei);
+    store.index_state(R, ti, ri, ei) += store.integral_face(ti, ri, 5, ei);
   }
 }
 
