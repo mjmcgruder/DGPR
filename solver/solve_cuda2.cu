@@ -40,6 +40,8 @@ struct custore
 
   /* pre-computes */
 
+  real* Minv_   = nullptr;
+
   real* veval_  = nullptr;  // [bfuncs [qpoints]]
   real* vgrad_  = nullptr;  // [elems [bfuncs [direction [qpoints]]]]
   real* feval_  = nullptr;  // [local face [bfuncs [qpoints]]]
@@ -77,6 +79,11 @@ struct custore
   __forceinline__ __device__ real& index_state(real* U, u32 bi, u32 ri, u32 ei)
   {
     return U[nbfp * (rank * ei + ri) + bi];
+  }
+
+  __forceinline__ __device__ real* Minv(u32 ei)
+  {
+    return Minv_ + ((nbfp * (nbfp + 1)) / 2) * ei;
   }
 
   __forceinline__ __device__ real& veval(u32 qi, u32 bi)
@@ -1111,6 +1118,31 @@ __global__ void cuda_accumulate_face_residuals(custore store, real* R)
     store.index_state(R, ti, ri, ei) += store.integral_face(ti, ri, 3, ei);
     store.index_state(R, ti, ri, ei) += store.integral_face(ti, ri, 4, ei);
     store.index_state(R, ti, ri, ei) += store.integral_face(ti, ri, 5, ei);
+  }
+}
+
+__global__ void cuda_residual_mass_multiply(custore store, real* R, real* f)
+{
+  u32 ei = blockIdx.x;
+
+  real* M = store.Minv(ei);
+
+  for (u32 i = threadIdx.x; i < store.rank * store.nbfp; i += blockDim.x)
+  {
+    u32 ri = i / store.nbfp;
+    u32 bi = i - (ri * store.nbfp);
+
+    real tmp = 0.;
+    for (u32 ti = 0; ti < store.nbfp; ++ti)
+    {
+      u32 iMu = ((bi + 1) + ((2 * store.nbfp - (ti + 1)) * (ti) / 2)) - 1;
+      u32 iMl = ((ti + 1) + ((2 * store.nbfp - (bi + 1)) * (bi) / 2)) - 1;
+
+      u32 iM = (bi >= ti) * iMu + (bi < ti) * iMl;
+
+      tmp += -1. * M[iM] * store.index_state(R, ti, ri, ei);
+    }
+    store.index_state(f, bi, ri, ei) = tmp;
   }
 }
 
