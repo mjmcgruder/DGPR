@@ -381,7 +381,7 @@ __host__ void custore_free(custore* store)
 
 /* residual and related kernels --------------------------------------------- */
 
-__global__ void cuda_evaluate_volume_states(real* U, custore store)
+__global__ void cuda_evaluate_volume_states(custore store, real* U)
 {
   u32 ei = blockIdx.x;
 
@@ -407,7 +407,7 @@ __global__ void cuda_evaluate_volume_states(real* U, custore store)
   }
 }
 
-__global__ void cuda_evaluate_interior_face_states(real* U, custore store)
+__global__ void cuda_evaluate_interior_face_states(custore store, real* U)
 {
   u32 fi  = blockIdx.x;
   u32 eL  = (u32)store.iflist[5 * fi + 1];
@@ -449,7 +449,7 @@ __global__ void cuda_evaluate_interior_face_states(real* U, custore store)
   }
 }
 
-__global__ void cuda_evaluate_boundary_face_states(real* U, custore store)
+__global__ void cuda_evaluate_boundary_face_states(custore store, real* U)
 {
   u32 fi  = blockIdx.x;
   u32 eL  = (u32)store.bflist[4 * fi + 1];
@@ -974,7 +974,7 @@ __global__ void cuda_evaluate_boundary_face_flux(custore store,
   }
 }
 
-__global__ void cuda_accumulate_interior_residual(custore store, real* R)
+__global__ void cuda_evaluate_interior_residual(custore store, real* R)
 {
   u32 ei = blockIdx.x;
 
@@ -1184,7 +1184,23 @@ __global__ void cuda_gemm(u32 m, u32 k, u32 n, real* A, real* B, real* C)
     C[n * rC + cC] = accC;
 }
 
-__host__ void cuda_residual(custore store, real* d_R)
+__host__ void cuda_residual(custore store, parameters params, real* d_U,
+                            real* d_R, real* d_f)
 {
   cudaMemset(d_R, 0, store.solarr_size);
+
+  cuda_evaluate_volume_states<<<store.nelem, 1>>>(store, d_U);
+  cuda_evaluate_interior_face_states<<<store.niface, 1>>>(store, d_U);
+  cuda_evaluate_boundary_face_states<<<store.nbface, 1>>>(store, d_U);
+
+  cuda_evaluate_interior_flux<<<1, 1>>>(store, params);
+  cuda_evaluate_interior_face_flux<<<1, 1>>>(store, params);
+  cuda_evaluate_boundary_face_flux<<<1, 1>>>(store, params);
+
+  cuda_evaluate_interior_residual<<<store.nelem, 1>>>(store, d_R);
+  cuda_evaluate_interior_face_residuals<<<store.niface, 1>>>(store);
+  cuda_evaluate_boundary_face_residuals<<<store.nbface, 1>>>(store);
+  cuda_accumulate_face_residuals<<<1, 1>>>(store, d_R);
+
+  cuda_residual_mass_multiply<<<store.nelem, 1>>>(store, d_R, d_f);
 }
