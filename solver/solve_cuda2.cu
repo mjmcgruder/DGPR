@@ -272,6 +272,10 @@ __host__ custore custore_make(shared_geometry* geom, simstate* U, real* d_U)
 
   /* initialize pre-computes */
 
+  cudaMalloc(&store.Minv_, core->Minv_.len * sizeof(real));
+  cudaMemcpy(store.Minv_, core->Minv_.data, core->Minv_.len * sizeof(real),
+             cudaMemcpyHostToDevice);
+
   array<real, 2> shuffle_veval({1, 0}, core->refp.veval);
   cudaMalloc(&store.veval_, shuffle_veval.len * sizeof(real));
   cudaMemcpy(store.veval_, shuffle_veval.data, shuffle_veval.len * sizeof(real),
@@ -354,6 +358,7 @@ __host__ custore custore_make(shared_geometry* geom, simstate* U, real* d_U)
 
 __host__ void custore_free(custore* store)
 {
+  cudaFree(store->Minv_);
   cudaFree(store->veval_);
   cudaFree(store->vgrad_);
   cudaFree(store->feval_);
@@ -509,11 +514,11 @@ __global__ void cuda_evaluate_interior_flux(custore store, parameters params)
     Sy[3] = store.state_vgrad(qi, 1, 3, ei);
     Sy[4] = store.state_vgrad(qi, 1, 4, ei);
 
-    Sx[0] = store.state_vgrad(qi, 2, 0, ei);
-    Sx[1] = store.state_vgrad(qi, 2, 1, ei);
-    Sx[2] = store.state_vgrad(qi, 2, 2, ei);
-    Sx[3] = store.state_vgrad(qi, 2, 3, ei);
-    Sx[4] = store.state_vgrad(qi, 2, 4, ei);
+    Sz[0] = store.state_vgrad(qi, 2, 0, ei);
+    Sz[1] = store.state_vgrad(qi, 2, 1, ei);
+    Sz[2] = store.state_vgrad(qi, 2, 2, ei);
+    Sz[3] = store.state_vgrad(qi, 2, 3, ei);
+    Sz[4] = store.state_vgrad(qi, 2, 4, ei);
 
     real Fx[5], Fy[5], Fz[5];
     real Qx[5], Qy[5], Qz[5];
@@ -1188,19 +1193,43 @@ __host__ void cuda_residual(custore store, parameters params, real* d_U,
                             real* d_R, real* d_f)
 {
   cudaMemset(d_R, 0, store.solarr_size);
+  cudaDeviceSynchronize();
 
   cuda_evaluate_volume_states<<<store.nelem, 1>>>(store, d_U);
-  cuda_evaluate_interior_face_states<<<store.niface, 1>>>(store, d_U);
-  cuda_evaluate_boundary_face_states<<<store.nbface, 1>>>(store, d_U);
-
+  cudaDeviceSynchronize();
   cuda_evaluate_interior_flux<<<1, 1>>>(store, params);
-  cuda_evaluate_interior_face_flux<<<1, 1>>>(store, params);
-  cuda_evaluate_boundary_face_flux<<<1, 1>>>(store, params);
-
+  cudaDeviceSynchronize();
   cuda_evaluate_interior_residual<<<store.nelem, 1>>>(store, d_R);
+  cudaDeviceSynchronize();
+
+  cuda_evaluate_interior_face_states<<<store.niface, 1>>>(store, d_U);
+  cudaDeviceSynchronize();
+  cuda_evaluate_interior_face_flux<<<1, 1>>>(store, params);
+  cudaDeviceSynchronize();
   cuda_evaluate_interior_face_residuals<<<store.niface, 1>>>(store);
+  cudaDeviceSynchronize();
+
+  cuda_evaluate_boundary_face_states<<<store.nbface, 1>>>(store, d_U);
+  cudaDeviceSynchronize();
+  cuda_evaluate_boundary_face_flux<<<1, 1>>>(store, params);
+  cudaDeviceSynchronize();
   cuda_evaluate_boundary_face_residuals<<<store.nbface, 1>>>(store);
+  cudaDeviceSynchronize();
+
   cuda_accumulate_face_residuals<<<1, 1>>>(store, d_R);
+  cudaDeviceSynchronize();
 
   cuda_residual_mass_multiply<<<store.nelem, 1>>>(store, d_R, d_f);
+  cudaDeviceSynchronize();
+
+  array<real> h_f(store.solarr_size);
+  cudaMemcpy(h_f.data, d_f, store.solarr_size * sizeof(real),
+             cudaMemcpyDeviceToHost);
+
+  for (u32 ei = 0; ei < store.nelem; ++ei)
+    for (u32 ri = 0; ri < store.rank; ++ri)
+      for (u32 ti = 0; ti < store.nbfp; ++ti)
+      {
+        printf("%u %u %u: %+.8e\n", ei, ri, ti, h_f[ri * store.nbfp + ti]);
+      }
 }
