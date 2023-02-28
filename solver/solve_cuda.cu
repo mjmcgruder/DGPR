@@ -1234,7 +1234,8 @@ __host__ u32 round_up_32(u32 a)
 
 __host__ void cuda_residual(float* state, cuda_device_geometry h_cugeom,
                             parameters params, cuda_residual_workspace wsp,
-                            float* residual, float* f)
+                            float* residual, float* f, shared_geometry& geom,
+                            float* dbg_resid)
 {
   cuda_zero_array<<<idiv_ceil(wsp.solarr_size, 256), 256>>>(
   wsp.solarr_size, residual);
@@ -1279,6 +1280,20 @@ __host__ void cuda_residual(float* state, cuda_device_geometry h_cugeom,
   cuda_update_state<<<h_cugeom.nelem, round_up_32(h_cugeom.refp_nbf3d)>>>(
   h_cugeom.nelem, h_cugeom.refp_nbf3d, h_cugeom.geo_Minv, residual, f);
   cudaDeviceSynchronize();
+
+  {
+    array<real> h_R_shuffle(wsp.solarr_size);
+    cudaMemcpy(h_R_shuffle.data, f, wsp.solarr_size * sizeof(real),
+               cudaMemcpyDeviceToHost);
+
+    simstate h_R(geom.core);
+    unshuffle_state(h_R_shuffle.data, geom, h_R);
+
+    for (u32 i = 0; i < h_R.size(); ++i)
+    {
+      dbg_resid[i] = h_R[i];
+    }
+  }
 }
 
 #undef NENTRYMINV

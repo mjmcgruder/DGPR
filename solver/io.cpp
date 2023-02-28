@@ -191,9 +191,10 @@ struct option
 // for now let's say all options are specified with a single dash
 // also for now let's say all arguments are specified in the next argument
 // everything else is just... ignored
-int optparse(int argc, char** argv, int optc, option* opts)
+int optparse(int argc, char** argv, int optc, option* opts, bool& help)
 {
   int head = 1;  // set at position of next arg to be read
+
   // print help and exit if requested
   if (argc > 1 && strcmp(argv[head], "-h") == 0)
   {
@@ -202,8 +203,10 @@ int optparse(int argc, char** argv, int optc, option* opts)
     {
       printf("  %10s: %s\n", opts[oi].name, opts[oi].description);
     }
-    return 1;
+    help = true;
+    return 0;
   }
+
   // otherwise parse
   while (head < argc)
   {

@@ -181,12 +181,12 @@ v3 surf2vol(u64 face, v2 s)
 {
   switch (face)
   {
-    case 0: return v3(0.0, s.x, s.y); break;
-    case 1: return v3(1.0, s.x, s.y); break;
-    case 2: return v3(s.y, 0.0, s.x); break;
-    case 3: return v3(s.y, 1.0, s.x); break;
-    case 4: return v3(s.x, s.y, 0.0); break;
-    case 5: return v3(s.x, s.y, 1.0); break;
+    case 0: return v3(0.0, s.x, s.y);
+    case 1: return v3(1.0, s.x, s.y);
+    case 2: return v3(s.y, 0.0, s.x);
+    case 3: return v3(s.y, 1.0, s.x);
+    case 4: return v3(s.x, s.y, 0.0);
+    case 5: return v3(s.x, s.y, 1.0);
   }
   return v3();
 }

@@ -730,7 +730,7 @@ __global__ void cuda_evaluate_interior_face_flux(custore store,
       }
 
       for (u32 ri = 0; ri < 5; ++ri)
-        Qh[5 * qi + ri] = QHx[ri] * n[0] + QHy[ri] * n[1] + QHz[ri] * n[2];
+        Qh[ri] = QHx[ri] * n[0] + QHy[ri] * n[1] + QHz[ri] * n[2];
     }
 
     store.flux_int(qi, 0, 0, fi) = F[0];
@@ -872,11 +872,11 @@ __global__ void cuda_evaluate_boundary_face_flux(custore store,
       real Fx[5], Fy[5], Fz[5];
       analytical_flux(Sb, params.gamma, Fx, Fy, Fz);
 
-      F[5 * qi + 0] = Fx[0] * n[0] + Fy[0] * n[1] + Fz[0] * n[2];
-      F[5 * qi + 1] = Fx[1] * n[0] + Fy[1] * n[1] + Fz[1] * n[2];
-      F[5 * qi + 2] = Fx[2] * n[0] + Fy[2] * n[1] + Fz[2] * n[2];
-      F[5 * qi + 3] = Fx[3] * n[0] + Fy[3] * n[1] + Fz[3] * n[2];
-      F[5 * qi + 4] = Fx[4] * n[0] + Fy[4] * n[1] + Fz[4] * n[2];
+      F[0] = Fx[0] * n[0] + Fy[0] * n[1] + Fz[0] * n[2];
+      F[1] = Fx[1] * n[0] + Fy[1] * n[1] + Fz[1] * n[2];
+      F[2] = Fx[2] * n[0] + Fy[2] * n[1] + Fz[2] * n[2];
+      F[3] = Fx[3] * n[0] + Fy[3] * n[1] + Fz[3] * n[2];
+      F[4] = Fx[4] * n[0] + Fy[4] * n[1] + Fz[4] * n[2];
     }
 
     /* dual consistency term */
@@ -944,7 +944,7 @@ __global__ void cuda_evaluate_boundary_face_flux(custore store,
       }
 
       for (u64 ri = 0; ri < 5; ++ri)
-        Qh[5 * qi + ri] = QHx[ri] * n[0] + QHy[ri] * n[1] + QHz[ri] * n[2];
+        Qh[ri] = QHx[ri] * n[0] + QHy[ri] * n[1] + QHz[ri] * n[2];
     }
 
     store.flux_bnd(qi, 0, 0, fi) = F[0];
@@ -1102,7 +1102,7 @@ __global__ void cuda_evaluate_boundary_face_residuals(custore store)
       (J * qw);
     }
 
-    store.integral_face(ti, ri, lfL, eL);
+    store.integral_face(ti, ri, lfL, eL) = residualL;
   }
 }
 
@@ -1190,9 +1190,12 @@ __global__ void cuda_gemm(u32 m, u32 k, u32 n, real* A, real* B, real* C)
 }
 
 __host__ void cuda_residual(custore store, parameters params, real* d_U,
-                            real* d_R, real* d_f)
+                            real* d_R, real* d_f, real* dbg_resid)
 {
   cudaMemset(d_R, 0, store.solarr_size);
+  cudaDeviceSynchronize();
+  
+  cudaMemset(store.integral_face_, 0, store.size_integral_face());
   cudaDeviceSynchronize();
 
   cuda_evaluate_volume_states<<<store.nelem, 1>>>(store, d_U);
@@ -1216,20 +1219,27 @@ __host__ void cuda_residual(custore store, parameters params, real* d_U,
   cuda_evaluate_boundary_face_residuals<<<store.nbface, 1>>>(store);
   cudaDeviceSynchronize();
 
+  // array<real> h_state_bfeval(store.size_state_bfeval());
+  // cudaMemcpy(h_state_bfeval.data, store.state_bfeval_,
+  //            store.size_state_bfeval() * sizeof(real), cudaMemcpyDeviceToHost);
+
+  // for (u32 i = 0; i < h_state_bfeval.len; ++i)
+  //   printf("%+.8e\n", h_state_bfeval[i]);
+
   cuda_accumulate_face_residuals<<<1, 1>>>(store, d_R);
   cudaDeviceSynchronize();
 
   cuda_residual_mass_multiply<<<store.nelem, 1>>>(store, d_R, d_f);
   cudaDeviceSynchronize();
 
-  array<real> h_f(store.solarr_size);
-  cudaMemcpy(h_f.data, d_f, store.solarr_size * sizeof(real),
-             cudaMemcpyDeviceToHost);
+  {
+    array<real> h_R(store.solarr_size);
+    cudaMemcpy(h_R.data, d_f, store.solarr_size * sizeof(real),
+               cudaMemcpyDeviceToHost);
 
-  for (u32 ei = 0; ei < store.nelem; ++ei)
-    for (u32 ri = 0; ri < store.rank; ++ri)
-      for (u32 ti = 0; ti < store.nbfp; ++ti)
-      {
-        printf("%u %u %u: %+.8e\n", ei, ri, ti, h_f[ri * store.nbfp + ti]);
-      }
+    for (u32 i = 0; i < h_R.len; ++i)
+    {
+      dbg_resid[i] = h_R[i];
+    }
+  }
 }

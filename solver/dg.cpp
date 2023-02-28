@@ -31,7 +31,9 @@ int main(int argc, char** argv)
 
   /* argument parsing */
 
-  solver_inputs inputs = parse_solver_inputs(argc, argv);
+  bool help = false;
+  solver_inputs inputs = parse_solver_inputs(argc, argv, help);
+  if (help) return 0;
 
   /* --------------------------------- */
   /* state and geometry initialization */

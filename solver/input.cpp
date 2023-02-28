@@ -65,7 +65,7 @@ struct solver_inputs
   bool init_turbulent = false;
 };
 
-solver_inputs parse_solver_inputs(int argc, char** argv)
+solver_inputs parse_solver_inputs(int argc, char** argv, bool& help)
 {
   solver_inputs inputs;
 
@@ -118,7 +118,7 @@ solver_inputs parse_solver_inputs(int argc, char** argv)
   mkopt("ifile", "input file prefix", inputs.ifile_prefix),
   };
 
-  if (optparse(argc, argv, solver_optc, solver_optlist))
+  if (optparse(argc, argv, solver_optc, solver_optlist, help))
     errout("solver argument parsing failed!");
 
   return inputs;
