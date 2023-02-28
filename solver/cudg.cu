@@ -19,8 +19,7 @@
 
 #include "solver_init.cpp"
 
-#include "solve_cuda.cu"
-#include "solve_cuda2.cu"
+#include "time_cuda.cu"
 
 int main(int argc, char** argv)
 {
@@ -72,140 +71,87 @@ int main(int argc, char** argv)
     tstep += 1;  // starting on the step after the one that was read
   }
 
+  // simstate& U = outputs.get("state");
+  // {
+  //   float *d_U, *d_R, *d_f;  // [rank [elem [bfuncs]]]
+  //   cudaMalloc(&d_U, U.size() * sizeof(real));
+  //   cudaMalloc(&d_R, U.size() * sizeof(real));
+  //   cudaMalloc(&d_f, U.size() * sizeof(real));
 
-  // new residual
-  simstate& U = outputs.get("state");
-  array<real> R_old(U.size());
-  array<real> R_new(U.size());
+  //   custore store = custore_make(&geom, &U, d_U);
 
-  {
-    float *d_U, *d_R, *d_f;  // [rank [elem [bfuncs]]]
-    cudaMalloc(&d_U, U.size() * sizeof(real));
-    cudaMalloc(&d_R, U.size() * sizeof(real));
-    cudaMalloc(&d_f, U.size() * sizeof(real));
+  //   cuda_residual(store, sim_params, d_U, d_R, d_f);
 
-    custore store = custore_make(&geom, &U, d_U);
-
-    cuda_residual(store, sim_params, d_U, d_R, d_f, R_new.data);
-
-    cudaFree(d_U);
-    cudaFree(d_R);
-    cudaFree(d_f);
-    custore_free(&store);
-  }
-
-  // old residual
-  {
-    cuda_device_geometry cugeom(geom);
-    cuda_residual_workspace workspace(&cugeom, 4);
-
-    float* state;
-    float* residual;
-    float* f;
-    {
-      array<float> U_rearranged(U.U.len);
-
-      shuffle_state(U, geom, U_rearranged.data);
-
-      cudaMalloc(&state, U.size() * sizeof(*state));
-      cudaMemcpy(state, U_rearranged.data, U.size() * sizeof(*state),
-                 cudaMemcpyHostToDevice);
-    }
-    cudaMalloc(&residual, U.size() * sizeof(float));
-    cudaMalloc(&f, U.size() * sizeof(float));
-
-    cuda_residual(state, cugeom, sim_params, workspace, residual, f, geom,
-                  R_old.data);
-  }
-
-  for (u32 ei = 0; ei < geom.core.nelem; ++ei)
-    for (u32 ri = 0; ri < 5; ++ri)
-      for (u32 ti = 0; ti < geom.core.refp.nbf3d; ++ti)
-      {
-        printf("%u %u %u: %+.8e %+.8e %+.8e\n", ei, ri, ti,
-               R_old[ri * geom.core.refp.nbf3d + ti],
-               R_new[ri * geom.core.refp.nbf3d + ti],
-               R_old[ri * geom.core.refp.nbf3d + ti] -
-               R_new[ri * geom.core.refp.nbf3d + ti]);
-      }
+  //   cudaFree(d_U);
+  //   cudaFree(d_R);
+  //   cudaFree(d_f);
+  //   custore_free(&store);
+  // }
 
   /* data prep */
 
-  // u32 naux = 0;
-  // void (*step)(u64 tstep, float dt, cuda_device_geometry h_cugeom, float* state,
-  //              parameters params, cuda_residual_workspace wsp);
+  u32 naux = 0;
+  void (*step)(u64 tstep, real dt, custore store, cuworkspace wsp,
+               parameters params, real * U);
 
-  // switch (inputs.scheme)
-  // {
-  //   case tvdRK3:
-  //     step = tvdRK3_cuda;
-  //     naux = 4;
-  //     break;
-  //   case RK4:
-  //     step = RK4_cuda;
-  //     naux = 8;
-  //     break;
-  //   default:
-  //     errout("requested time scheme not implemented!");
-  //     break;
-  // }
+  switch (inputs.scheme)
+  {
+    case tvdRK3:
+      step = tvdRK3_cuda;
+      naux = 4;
+      break;
+    case RK4:
+      step = RK4_cuda;
+      naux = 8;
+      break;
+    default:
+      errout("requested time scheme not implemented!");
+      break;
+  }
 
-  // cuda_device_geometry cugeom(geom);
-  // cuda_residual_workspace workspace(&cugeom, naux);
+  simstate& U = outputs.get("state");
 
-  // simstate& U = outputs.get("state");
-  // float* state;
-  // {
-  //   array<float> U_rearranged(U.U.len);
+  real* d_state;
+  cudaMalloc(&d_state, U.size() * sizeof(real));
 
-  //   shuffle_state(U, geom, U_rearranged.data);
+  custore store         = custore_make(&geom, &U, d_state);
+  cuworkspace workspace = cuworkspace_make(&store, naux);
 
-  //   cudaMalloc(&state, U.size() * sizeof(*state));
-  //   cudaMemcpy(state, U_rearranged.data, U.size() * sizeof(*state),
-  //              cudaMemcpyHostToDevice);
-  // }
+  /* time stepping */
 
-  // /* time stepping */
+  char ofile[1024];
+  u64 tfinal = tstep + inputs.niter;
+  for (; tstep < tfinal; ++tstep)
+  {
+    // // checkpoint
+    // if ((tstep + 1) % inputs.chkint == 0)
+    // {
+    //   array<float> U_rearranged(U.U.len);
 
-  // char ofile[1024];
-  // u64 tfinal = tstep + inputs.niter;
-  // for (; tstep < tfinal; ++tstep)
-  // {
-  //   // checkpoint
-  //   if ((tstep + 1) % inputs.chkint == 0)
-  //   {
-  //     array<float> U_rearranged(U.U.len);
+    //   cudaMemcpy(U_rearranged.data, state, U.size() * sizeof(*state),
+    //              cudaMemcpyDeviceToHost);
 
-  //     cudaMemcpy(U_rearranged.data, state, U.size() * sizeof(*state),
-  //                cudaMemcpyDeviceToHost);
+    //   unshuffle_state(U_rearranged.data, geom, U);
 
-  //     unshuffle_state(U_rearranged.data, geom, U);
+    //   sprintf(ofile, "%s%" PRIu64 ".dg", inputs.ofile_prefix, tstep);
+    //   write_state(ofile, tstep, geom.core, outputs);
+    // }
 
-  //     sprintf(ofile, "%s%" PRIu64 ".dg", inputs.ofile_prefix, tstep);
-  //     write_state(ofile, tstep, geom.core, outputs);
-  //   }
+    // step in time
+    step(tstep, inputs.dt, store, workspace, sim_params, d_state);
+  }
 
-  //   // step in time
-  //   step(tstep, inputs.dt, cugeom, state, sim_params, workspace);
-  // }
+  cudaMemcpy(U.U.data, d_state, U.size() * sizeof(real),
+             cudaMemcpyDeviceToHost);
 
-  // {
-  //   array<float> U_rearranged(U.U.len);
-  //   cudaMemcpy(U_rearranged.data, state, U.size() * sizeof(*state),
-  //              cudaMemcpyDeviceToHost);
-
-  //   unshuffle_state(U_rearranged.data, geom, U);
-  // }
-
-  // sprintf(ofile, "%s.dg", inputs.ofile_prefix);
-  // write_state(ofile, tstep - 1, geom.core, outputs);
+  sprintf(ofile, "%s.dg", inputs.ofile_prefix);
+  write_state(ofile, tstep - 1, geom.core, outputs);
 
   /* clean up */
 
-  // cudaFree(state);
-
-  // free_cuda_device_geometry(&cugeom);
-  // free_cuda_residual_workspace(&workspace);
+  cudaFree(d_state);
+  custore_free(&store);
+  cuworkspace_free(&workspace);
 
   return 0;
 }

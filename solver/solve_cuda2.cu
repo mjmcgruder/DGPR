@@ -384,6 +384,37 @@ __host__ void custore_free(custore* store)
   cudaFree(store->integral_face_);
 }
 
+struct cuworkspace
+{
+  u32 naux;
+  real** aux;
+};
+
+cuworkspace cuworkspace_make(custore* store, u32 naux)
+{
+  cuworkspace wsp;
+
+  wsp.naux = naux;
+  wsp.aux = new real*[naux];
+
+  for (u32 i = 0; i < naux; ++i)
+  {
+    cudaMalloc(&wsp.aux[i], store->solarr_size * sizeof(real));
+  }
+
+  return wsp;
+}
+
+void cuworkspace_free(cuworkspace* wsp)
+{
+  for(u32 i = 0; i < wsp->naux; ++i)
+  {
+    cudaFree(wsp->aux[i]);
+  }
+
+  delete[] wsp->aux;
+}
+
 /* residual and related kernels --------------------------------------------- */
 
 __global__ void cuda_evaluate_volume_states(custore store, real* U)
@@ -1189,8 +1220,15 @@ __global__ void cuda_gemm(u32 m, u32 k, u32 n, real* A, real* B, real* C)
     C[n * rC + cC] = accC;
 }
 
+/* utilities ---------------------------------------------------------------- */
+
+__host__ u32 idiv_ceil(u32 a, u32 b)
+{
+  return (a + b - 1) / b;
+}
+
 __host__ void cuda_residual(custore store, parameters params, real* d_U,
-                            real* d_R, real* d_f, real* dbg_resid)
+                            real* d_R, real* d_f)
 {
   cudaMemset(d_R, 0, store.solarr_size);
   cudaDeviceSynchronize();
@@ -1212,34 +1250,19 @@ __host__ void cuda_residual(custore store, parameters params, real* d_U,
   cuda_evaluate_interior_face_residuals<<<store.niface, 1>>>(store);
   cudaDeviceSynchronize();
 
-  cuda_evaluate_boundary_face_states<<<store.nbface, 1>>>(store, d_U);
-  cudaDeviceSynchronize();
-  cuda_evaluate_boundary_face_flux<<<1, 1>>>(store, params);
-  cudaDeviceSynchronize();
-  cuda_evaluate_boundary_face_residuals<<<store.nbface, 1>>>(store);
-  cudaDeviceSynchronize();
-
-  // array<real> h_state_bfeval(store.size_state_bfeval());
-  // cudaMemcpy(h_state_bfeval.data, store.state_bfeval_,
-  //            store.size_state_bfeval() * sizeof(real), cudaMemcpyDeviceToHost);
-
-  // for (u32 i = 0; i < h_state_bfeval.len; ++i)
-  //   printf("%+.8e\n", h_state_bfeval[i]);
+  if (store.nbface > 0)
+  {
+    cuda_evaluate_boundary_face_states<<<store.nbface, 1>>>(store, d_U);
+    cudaDeviceSynchronize();
+    cuda_evaluate_boundary_face_flux<<<1, 1>>>(store, params);
+    cudaDeviceSynchronize();
+    cuda_evaluate_boundary_face_residuals<<<store.nbface, 1>>>(store);
+    cudaDeviceSynchronize();
+  }
 
   cuda_accumulate_face_residuals<<<1, 1>>>(store, d_R);
   cudaDeviceSynchronize();
 
   cuda_residual_mass_multiply<<<store.nelem, 1>>>(store, d_R, d_f);
   cudaDeviceSynchronize();
-
-  {
-    array<real> h_R(store.solarr_size);
-    cudaMemcpy(h_R.data, d_f, store.solarr_size * sizeof(real),
-               cudaMemcpyDeviceToHost);
-
-    for (u32 i = 0; i < h_R.len; ++i)
-    {
-      dbg_resid[i] = h_R[i];
-    }
-  }
 }
