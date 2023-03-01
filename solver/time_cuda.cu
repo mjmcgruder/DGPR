@@ -141,15 +141,15 @@ void tvdRK3_cuda(u64 tstep, real dt, custore store, cuworkspace wsp,
   real* U2       = wsp.aux[2];
   real* f        = wsp.aux[3];
 
-  cuda_residual(store, params, U, residual, f);
-  tvdRK3_cuda_acc1<<<idiv_ceil(store.solarr_size, 256), 256>>>(
-  store.solarr_size, dt, U, U1, f);
-  cudaDeviceSynchronize();
-
   // cuda_residual(store, params, U, residual, f);
-  // tvdRK3_cuda_fe<<<idiv_ceil(store.solarr_size, 256), 256>>>(
-  // store.solarr_size, dt, U, f);
+  // tvdRK3_cuda_acc1<<<idiv_ceil(store.solarr_size, 256), 256>>>(
+  // store.solarr_size, dt, U, U1, f);
   // cudaDeviceSynchronize();
+
+  cuda_residual(store, params, U, residual, f);
+  tvdRK3_cuda_fe<<<idiv_ceil(store.solarr_size, 256), 256>>>(
+  store.solarr_size, dt, U, f);
+  cudaDeviceSynchronize();
 
   residual_norm(store.solarr_size, residual, tstep);
 

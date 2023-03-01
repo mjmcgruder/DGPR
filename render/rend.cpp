@@ -35,8 +35,10 @@ int main(int argc, char** argv)
   mkopt("features", "prints vulkan implementation features", &print_vkfeatures),
   };
 
-  if (optparse(argc, argv, optc, optlist))
+  bool help = false;
+  if (optparse(argc, argv, optc, optlist, help))
     return 1;
+  if (help) return 0;
 
   /* read input file */
 
