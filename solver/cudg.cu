@@ -106,19 +106,15 @@ int main(int argc, char** argv)
   u64 tfinal = tstep + inputs.niter;
   for (; tstep < tfinal; ++tstep)
   {
-    // // checkpoint
-    // if ((tstep + 1) % inputs.chkint == 0)
-    // {
-    //   array<float> U_rearranged(U.U.len);
+    // checkpoint
+    if ((tstep + 1) % inputs.chkint == 0)
+    {
+      cudaMemcpy(U.U.data, d_state, U.size() * sizeof(real),
+                 cudaMemcpyDeviceToHost);
 
-    //   cudaMemcpy(U_rearranged.data, state, U.size() * sizeof(*state),
-    //              cudaMemcpyDeviceToHost);
-
-    //   unshuffle_state(U_rearranged.data, geom, U);
-
-    //   sprintf(ofile, "%s%" PRIu64 ".dg", inputs.ofile_prefix, tstep);
-    //   write_state(ofile, tstep, geom.core, outputs);
-    // }
+      sprintf(ofile, "%s%" PRIu64 ".dg", inputs.ofile_prefix, tstep);
+      write_state(ofile, tstep, geom.core, outputs);
+    }
 
     // step in time
     step(tstep, inputs.dt, store, workspace, sim_params, d_state);

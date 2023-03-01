@@ -1044,6 +1044,30 @@ __global__ void cuda_evaluate_interior_residual(custore store, real* R)
   }
 }
 
+__global__ void cuda_evaluate_source(custore store, parameters params, real* R)
+{
+  u32 ei = blockIdx.x;
+
+  for (u32 i = threadIdx.x; i < store.nbfp * store.rank; i += blockDim.x)
+  {
+    u32 ri = i / store.nbfp;
+    u32 ti = i - (ri * store.nbfp);
+
+    real residual = 0.;
+    for (u32 qi = 0; qi < store.nvolqp; ++qi)
+    {
+      real qw = store.vquadw(qi);
+      real J  = store.vJ(qi, ei);
+
+      real tfnc = store.veval(qi, ti);
+
+      residual -= tfnc * params.source[ri] * J * qw;
+    }
+
+    store.index_state(R, ti, ri, ei) += residual;
+  }
+}
+
 __global__ void cuda_evaluate_interior_face_residuals(custore store)
 {
   u32 fi = blockIdx.x;
@@ -1262,6 +1286,9 @@ __host__ void cuda_residual(custore store, parameters params, real* d_U,
 
   cuda_accumulate_face_residuals<<<
   idiv_ceil(store.nelem * store.rank * store.nbfp, 256), 256>>>(store, d_R);
+  cudaDeviceSynchronize();
+
+  cuda_evaluate_source<<<store.nelem, 128>>>(store, params, d_R);
   cudaDeviceSynchronize();
 
   cuda_residual_mass_multiply<<<store.nelem, 256>>>(store, d_R, d_f);
