@@ -71,23 +71,6 @@ int main(int argc, char** argv)
     tstep += 1;  // starting on the step after the one that was read
   }
 
-  // simstate& U = outputs.get("state");
-  // {
-  //   float *d_U, *d_R, *d_f;  // [rank [elem [bfuncs]]]
-  //   cudaMalloc(&d_U, U.size() * sizeof(real));
-  //   cudaMalloc(&d_R, U.size() * sizeof(real));
-  //   cudaMalloc(&d_f, U.size() * sizeof(real));
-
-  //   custore store = custore_make(&geom, &U, d_U);
-
-  //   cuda_residual(store, sim_params, d_U, d_R, d_f);
-
-  //   cudaFree(d_U);
-  //   cudaFree(d_R);
-  //   cudaFree(d_f);
-  //   custore_free(&store);
-  // }
-
   /* data prep */
 
   u32 naux = 0;

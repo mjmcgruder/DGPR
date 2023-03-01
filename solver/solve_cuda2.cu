@@ -1230,39 +1230,40 @@ __host__ u32 idiv_ceil(u32 a, u32 b)
 __host__ void cuda_residual(custore store, parameters params, real* d_U,
                             real* d_R, real* d_f)
 {
-  cudaMemset(d_R, 0, store.solarr_size);
+  cudaMemset(d_R, 0, store.solarr_size * sizeof(real));
   cudaDeviceSynchronize();
   
-  cudaMemset(store.integral_face_, 0, store.size_integral_face());
+  cuda_evaluate_volume_states<<<store.nelem, 128>>>(store, d_U);
+  cudaDeviceSynchronize();
+  cuda_evaluate_interior_flux<<<idiv_ceil(store.nelem * store.nvolqp, 256),
+                                256>>>(store, params);
+  cudaDeviceSynchronize();
+  cuda_evaluate_interior_residual<<<store.nelem, 128>>>(store, d_R);
   cudaDeviceSynchronize();
 
-  cuda_evaluate_volume_states<<<store.nelem, 1>>>(store, d_U);
+  cuda_evaluate_interior_face_states<<<store.niface, 128>>>(store, d_U);
   cudaDeviceSynchronize();
-  cuda_evaluate_interior_flux<<<1, 1>>>(store, params);
+  cuda_evaluate_interior_face_flux<<<
+  idiv_ceil(store.niface * store.nfacqp, 256), 256>>>(store, params);
   cudaDeviceSynchronize();
-  cuda_evaluate_interior_residual<<<store.nelem, 1>>>(store, d_R);
-  cudaDeviceSynchronize();
-
-  cuda_evaluate_interior_face_states<<<store.niface, 1>>>(store, d_U);
-  cudaDeviceSynchronize();
-  cuda_evaluate_interior_face_flux<<<1, 1>>>(store, params);
-  cudaDeviceSynchronize();
-  cuda_evaluate_interior_face_residuals<<<store.niface, 1>>>(store);
+  cuda_evaluate_interior_face_residuals<<<store.niface, 128>>>(store);
   cudaDeviceSynchronize();
 
   if (store.nbface > 0)
   {
-    cuda_evaluate_boundary_face_states<<<store.nbface, 1>>>(store, d_U);
+    cuda_evaluate_boundary_face_states<<<store.nbface, 128>>>(store, d_U);
     cudaDeviceSynchronize();
-    cuda_evaluate_boundary_face_flux<<<1, 1>>>(store, params);
+    cuda_evaluate_boundary_face_flux<<<
+    idiv_ceil(store.nbface * store.nfacqp, 256), 256>>>(store, params);
     cudaDeviceSynchronize();
-    cuda_evaluate_boundary_face_residuals<<<store.nbface, 1>>>(store);
+    cuda_evaluate_boundary_face_residuals<<<store.nbface, 128>>>(store);
     cudaDeviceSynchronize();
   }
 
-  cuda_accumulate_face_residuals<<<1, 1>>>(store, d_R);
+  cuda_accumulate_face_residuals<<<
+  idiv_ceil(store.nelem * store.rank * store.nbfp, 256), 256>>>(store, d_R);
   cudaDeviceSynchronize();
 
-  cuda_residual_mass_multiply<<<store.nelem, 1>>>(store, d_R, d_f);
+  cuda_residual_mass_multiply<<<store.nelem, 256>>>(store, d_R, d_f);
   cudaDeviceSynchronize();
 }
