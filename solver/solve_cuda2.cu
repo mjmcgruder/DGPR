@@ -1010,64 +1010,120 @@ __global__ void cuda_evaluate_boundary_face_flux(custore store,
   }
 }
 
+__global__ void cuda_evaluate_interior_residual2(custore store, real* R)
+{
+  __shared__ real tile_tgrad0[32][32];  // quad by tfnc
+  __shared__ real tile_tgrad1[32][32];
+  __shared__ real tile_tgrad2[32][32];
+  __shared__ real tile_Fx[5][32];  // rank by quad
+  __shared__ real tile_Fy[5][32];
+  __shared__ real tile_Fz[5][32];
+  __shared__ real tile_Qx[5][32];
+  __shared__ real tile_Qy[5][32];
+  __shared__ real tile_Qz[5][32];
+  __shared__ real tile_qw[32];
+  __shared__ real tile_J[32];
+
+  u32 ei  = blockIdx.x;
+  u32 ri  = threadIdx.x / 32;
+  u32 lti = threadIdx.x - (ri * 32);
+
+  for (u32 bt = 0; bt < (store.nbfp + 32 - 1) / 32; ++bt)
+  {
+    real residual = 0.;
+    for (u32 bq = 0; bq < (store.nvolqp + 32 - 1) / 32; ++bq)
+    {
+      for (u32 i = threadIdx.x; i < 32 * 32; i += blockDim.x)
+      {
+        u32 row = i / 32;
+        u32 col = i - (row * 32);
+
+        if (32 * bq + col < store.nvolqp && 32 * bt + row < store.nbfp)
+        {
+          tile_tgrad0[row][col] =
+          store.vgrad(32 * bq + col, 32 * bt + row, ei, 0);
+          tile_tgrad1[row][col] =
+          store.vgrad(32 * bq + col, 32 * bt + row, ei, 1);
+          tile_tgrad2[row][col] =
+          store.vgrad(32 * bq + col, 32 * bt + row, ei, 2);
+        }
+        else
+        {
+          tile_tgrad0[row][col] = 0.;
+          tile_tgrad1[row][col] = 0.;
+          tile_tgrad2[row][col] = 0.;
+        }
+      }
+
+      __syncthreads();
+
+      if (32 * bq + lti < store.nvolqp)
+      {
+        tile_Fx[ri][lti] = store.flux_vol(32 * bq + lti, 0, ri, ei);
+        tile_Fy[ri][lti] = store.flux_vol(32 * bq + lti, 1, ri, ei);
+        tile_Fz[ri][lti] = store.flux_vol(32 * bq + lti, 2, ri, ei);
+        tile_Qx[ri][lti] = store.flux_vol(32 * bq + lti, 3, ri, ei);
+        tile_Qy[ri][lti] = store.flux_vol(32 * bq + lti, 4, ri, ei);
+        tile_Qz[ri][lti] = store.flux_vol(32 * bq + lti, 5, ri, ei);
+
+        if (ri == 0)
+        {
+          tile_qw[lti] = store.vquadw(32 * bq + lti);
+          tile_J[lti]  = store.vJ(32 * bq + lti, ei);
+        }
+      }
+      else
+      {
+        tile_Fx[ri][lti] = 0.;
+        tile_Fy[ri][lti] = 0.;
+        tile_Fz[ri][lti] = 0.;
+        tile_Qx[ri][lti] = 0.;
+        tile_Qy[ri][lti] = 0.;
+        tile_Qz[ri][lti] = 0.;
+
+        if (ri == 0)
+        {
+          tile_qw[lti] = 0.;
+          tile_J[lti]  = 0.;
+        }
+      }
+
+      __syncthreads();
+
+      for (u32 lqi = 0; lqi < 32; ++lqi)
+      {
+        real qw = tile_qw[lqi];
+        real J  = tile_J[lqi];
+
+        real tgrad0 = tile_tgrad0[lti][lqi];
+        real tgrad1 = tile_tgrad1[lti][lqi];
+        real tgrad2 = tile_tgrad2[lti][lqi];
+
+        real Fx = tile_Fx[ri][lqi];
+        real Fy = tile_Fy[ri][lqi];
+        real Fz = tile_Fz[ri][lqi];
+        real Qx = tile_Qx[ri][lqi];
+        real Qy = tile_Qy[ri][lqi];
+        real Qz = tile_Qz[ri][lqi];
+
+        residual +=
+        (tgrad0 * (Qx - Fx) + tgrad1 * (Qy - Fy) + tgrad2 * (Qz - Fz)) *
+        (J * qw);
+      }
+
+      __syncthreads();
+    }
+
+    if (32 * bt + lti < store.nbfp)
+    {
+      store.index_state(R, 32 * bt + lti, ri, ei) += residual;
+    }
+  }
+}
+
 __global__ void cuda_evaluate_interior_residual(custore store, real* R)
 {
-  // __shared__ real tile_tgrad0[32][5];
-  // __shared__ real tile_tgrad1[32][5];
-  // __shared__ real tile_tgrad2[32][5];
-  // __shared__ real tile_Fx[5][32];
-  // __shared__ real tile_Fy[5][32];
-  // __shared__ real tile_Fz[5][32];
-  // __shared__ real tile_Qx[5][32];
-  // __shared__ real tile_Qy[5][32];
-  // __shared__ real tile_Qz[5][32];
-
   u32 ei = blockIdx.x;
-  // u32 ri = threadIdx.x / 32;
-  // u32 ti = threadIdx.x - (ri * 32);
-
-  // for (u32 bt = 0; bt < (store.nbfp + 32 - 1) / 32; ++bt)
-  // {
-  //   real residual = 0.;
-  //   for (u32 bq = 0; bq < (store.nvolqp + 32 - 1) / 32; ++bq)
-  //   {
-  //     // load (TODO: don't forget conditionals)
-  //     tile_tgrad0[ti][ri] = store.vgrad(32 * bq + ti, bt * 32 + ti, ei, 0);
-  //     tile_tgrad1[ti][ri] = store.vgrad(32 * bq + ti, bt * 32 + ti, ei, 1);
-  //     tile_tgrad2[ti][ri] = store.vgrad(32 * bq + ti, bt * 32 + ti, ei, 2);
-  //     tile_Fx[ri][ti]     = store.flux_vol(32 * bq + ti, 0, ri, ei);
-  //     tile_Fy[ri][ti]     = store.flux_vol(32 * bq + ti, 1, ri, ei);
-  //     tile_Fz[ri][ti]     = store.flux_vol(32 * bq + ti, 2, ri, ei);
-  //     tile_Qx[ri][ti]     = store.flux_vol(32 * bq + ti, 0, ri, ei);
-  //     tile_Qy[ri][ti]     = store.flux_vol(32 * bq + ti, 1, ri, ei);
-  //     tile_Qz[ri][ti]     = store.flux_vol(32 * bq + ti, 2, ri, ei);
-
-  //     real qw = store.vquadw(32 * bq + ti);
-  //     real J  = store.vJ(32 * bq + ti, ei);
-
-  //     __syncthreads();
-
-  //     for (u32 lqi = 0; lqi < 32; ++lqi)
-  //     {
-  //       real tgrad0 = tile_tgrad0[lqi][ri];
-  //       real tgrad1 = tile_tgrad1[lqi][ri];
-  //       real tgrad2 = tile_tgrad2[lqi][ri];
-
-  //       real Fx = tile_Fx[ri][lqi];
-  //       real Fy = tile_Fy[ri][lqi];
-  //       real Fz = tile_Fz[ri][lqi];
-  //       real Qx = tile_Qx[ri][lqi];
-  //       real Qy = tile_Qy[ri][lqi];
-  //       real Qz = tile_Qz[ri][lqi];
-
-  //       residual +=
-  //       (tgrad0 * (Qx - Fx) + tgrad1 * (Qy - Fy) + tgrad2 * (Qz - Fz)) *
-  //       (J * qw);
-  //     }
-  //   }
-
-  //   store.index_state(R, 32 * bt + ti, ri, ei) += residual;
-  // }
 
   for (u32 i = threadIdx.x; i < store.nbfp * store.rank; i += blockDim.x)
   {
@@ -1121,6 +1177,145 @@ __global__ void cuda_evaluate_source(custore store, parameters params, real* R)
 
     store.index_state(R, ti, ri, ei) += residual;
   }
+}
+
+__device__ void cuda_evaluate_interior_face_residual_one_side(
+custore& store, u32 fi, u32 lfL, u32 eL, u32 gfi, u32 lti, u32 ri, u32 bt,
+u32 bq, real tile_tgLx[32][32], real tile_tgLy[32][32], real tile_tgLz[32][32],
+real tile_tfL[32][32], real tile_F[5][32], real tile_dcQLx[5][32],
+real tile_dcQLy[5][32], real tile_dcQLz[5][32], real tile_Qh[5][32],
+real tile_qw[32], real tile_J[32], u32 voffset, real factor, real& residualL)
+{
+  for (u32 i = threadIdx.x; i < 32 * 32; i += blockDim.x)
+  {
+    u32 row = i / 32;
+    u32 col = i - (row * 32);
+
+    if (32 * bq + col < store.nfacqp && 32 * bt + row < store.nbfp)
+    {
+      tile_tgLx[row][col] =
+      store.fgrad(32 * bq + col, 0, 32 * bt + row, lfL, eL);
+      tile_tgLy[row][col] =
+      store.fgrad(32 * bq + col, 1, 32 * bt + row, lfL, eL);
+      tile_tgLz[row][col] =
+      store.fgrad(32 * bq + col, 2, 32 * bt + row, lfL, eL);
+      tile_tfL[row][col] = store.feval(32 * bq + col, 32 * bt + row, lfL);
+    }
+    else
+    {
+      tile_tgLx[row][col] = 0.;
+      tile_tgLy[row][col] = 0.;
+      tile_tgLz[row][col] = 0.;
+    }
+  }
+
+  __syncthreads();
+
+  if (32 * bq + lti < store.nfacqp)
+  {
+    tile_F[ri][lti]     = store.flux_int(32 * bq + lti, 0, ri, fi);
+    tile_dcQLx[ri][lti] = store.flux_int(32 * bq + lti, 1 + voffset, ri, fi);
+    tile_dcQLy[ri][lti] = store.flux_int(32 * bq + lti, 2 + voffset, ri, fi);
+    tile_dcQLz[ri][lti] = store.flux_int(32 * bq + lti, 3 + voffset, ri, fi);
+    tile_Qh[ri][lti]    = store.flux_int(32 * bq + lti, 7, ri, fi);
+
+    if (ri == 0)
+    {
+      tile_qw[lti] = store.fquadw(32 * bq + lti);
+      tile_J[lti]  = store.fJ(32 * bq + lti, gfi);
+    }
+  }
+  else
+  {
+    tile_F[ri][lti]     = 0.;
+    tile_dcQLx[ri][lti] = 0.;
+    tile_dcQLy[ri][lti] = 0.;
+    tile_dcQLz[ri][lti] = 0.;
+    tile_Qh[ri][lti]    = 0.;
+
+    if (ri == 0)
+    {
+      tile_qw[lti] = 0.;
+      tile_J[lti]  = 0.;
+    }
+  }
+
+  __syncthreads();
+
+  for (u32 lqi = 0; lqi < 32; ++lqi)
+  {
+    real qw = tile_qw[lqi];
+    real J  = tile_J[lqi];
+
+    real tfL = tile_tfL[lti][lqi];
+
+    real tgLx = tile_tgLx[lti][lqi];
+    real tgLy = tile_tgLy[lti][lqi];
+    real tgLz = tile_tgLz[lti][lqi];
+
+    real F     = tile_F[ri][lqi];
+    real dcQLx = tile_dcQLx[ri][lqi];
+    real dcQLy = tile_dcQLx[ri][lqi];
+    real dcQLz = tile_dcQLx[ri][lqi];
+    real Qh    = tile_Qh[ri][lqi];
+
+    residualL +=
+    factor *
+    (+(tfL * F) - (tgLx * dcQLx + tgLy * dcQLy + tgLz * dcQLz) - (tfL * Qh)) *
+    (J * qw);
+  }
+
+  __syncthreads();
+}
+
+__global__ void cuda_evaluate_interior_face_residuals2(custore store)
+{
+  __shared__ real tile_tgx[32][32];
+  __shared__ real tile_tgy[32][32];
+  __shared__ real tile_tgz[32][32];
+  __shared__ real tile_tf[32][32];
+  __shared__ real tile_F[5][32];
+  __shared__ real tile_dcQx[5][32];
+  __shared__ real tile_dcQy[5][32];
+  __shared__ real tile_dcQz[5][32];
+  __shared__ real tile_Qh[5][32];
+  __shared__ real tile_qw[32];
+  __shared__ real tile_J[32];
+  
+  u32 fi = blockIdx.x;
+
+  s32 gfi = store.iflist[5 * fi + 0];
+  s32 eL  = store.iflist[5 * fi + 1];
+  s32 eR  = store.iflist[5 * fi + 2];
+  s32 lfL = store.iflist[5 * fi + 3];
+  s32 lfR = store.iflist[5 * fi + 4];
+
+  u32 ri  = threadIdx.x / 32;
+  u32 lti = threadIdx.x - (ri * 32);
+
+  for (u32 bt = 0; bt < (store.nbfp + 32 - 1) / 32; ++bt)
+  {
+    real residualL = 0.;
+    real residualR = 0.;
+    for (u32 bq = 0; bq < (store.nfacqp + 32 - 1) / 32; ++bq)
+    {
+      cuda_evaluate_interior_face_residual_one_side(
+      store, fi, lfL, eL, gfi, lti, ri, bt, bq, tile_tgx, tile_tgy, tile_tgz,
+      tile_tf, tile_F, tile_dcQx, tile_dcQy, tile_dcQz, tile_Qh, tile_qw,
+      tile_J, 0, +1., residualL);
+      cuda_evaluate_interior_face_residual_one_side(
+      store, fi, lfR, eR, gfi, lti, ri, bt, bq, tile_tgx, tile_tgy, tile_tgz,
+      tile_tf, tile_F, tile_dcQx, tile_dcQy, tile_dcQz, tile_Qh, tile_qw,
+      tile_J, 3, -1., residualR);
+    }
+
+    if (32 * bt + lti < store.nbfp)
+    {
+      store.integral_face(32 * bt + lti, ri, lfL, eL) = residualL;
+      store.integral_face(32 * bt + lti, ri, lfR, eR) = residualR;
+    }
+  }
+
 }
 
 __global__ void cuda_evaluate_interior_face_residuals(custore store)
@@ -1317,7 +1512,8 @@ __host__ void cuda_residual(custore store, parameters params, real* d_U,
   cuda_evaluate_interior_flux<<<idiv_ceil(store.nelem * store.nvolqp, 256),
                                 256>>>(store, params);
   cudaDeviceSynchronize();
-  cuda_evaluate_interior_residual<<<store.nelem, 128>>>(store, d_R);
+
+  cuda_evaluate_interior_residual2<<<store.nelem, 32 * 5>>>(store, d_R);
   cudaDeviceSynchronize();
 
   cuda_evaluate_interior_face_states<<<store.niface, 128>>>(store, d_U);
@@ -1325,7 +1521,8 @@ __host__ void cuda_residual(custore store, parameters params, real* d_U,
   cuda_evaluate_interior_face_flux<<<
   idiv_ceil(store.niface * store.nfacqp, 256), 256>>>(store, params);
   cudaDeviceSynchronize();
-  cuda_evaluate_interior_face_residuals<<<store.niface, 128>>>(store);
+
+  cuda_evaluate_interior_face_residuals2<<<store.niface, 32 * 5>>>(store);
   cudaDeviceSynchronize();
 
   if (store.nbface > 0)
