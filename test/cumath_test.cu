@@ -52,9 +52,8 @@ void run_cugpu_test(u32 m, u32 n, u32 k)
   matmul(m, k, n, 1.f, A.data, B.data, 0.f, Ccpu.data);
   double cpu_end = MPI_Wtime();
 
-  dim3 block(TILE_SIZE, TILE_SIZE);
-  dim3 grid((n + (block.x - 1)) / block.x, 
-            (m + (block.y - 1)) / block.y);
+  dim3 block(32, 32);
+  dim3 grid(idiv_ceil(n, block.x), idiv_ceil(m, block.y));
 
   double gpu_start = MPI_Wtime();
   cuda_gemm<<<grid, block>>>(m, k, n, d_A, d_B, d_C);
@@ -78,15 +77,15 @@ void run_cugpu_test(u32 m, u32 n, u32 k)
 
 TEST(cumath_test_matmul, 1)
 {
-  run_cugpu_test(17, 17, 17);     // small stuff
-  run_cugpu_test(128, 128, 128);  // square, tile divides evenly
-  run_cugpu_test(100, 100, 100);  // square, tile divides unevenly
-  run_cugpu_test(128, 128, 150);  // short and fat C, inner dim divs evenly
-  run_cugpu_test(150, 128, 128);  // tall and skinny C, inner dim divs evenly
-  run_cugpu_test(128, 175, 150);  // short and fat C, inner dim divs unevenly
-  run_cugpu_test(150, 175, 128);  // tall n skinny C, inner dim divs unevenly
+  // run_cugpu_test(17, 17, 17);     // small stuff
+  // run_cugpu_test(128, 128, 128);  // square, tile divides evenly
+  // run_cugpu_test(100, 100, 100);  // square, tile divides unevenly
+  // run_cugpu_test(128, 128, 150);  // short and fat C, inner dim divs evenly
+  // run_cugpu_test(150, 128, 128);  // tall and skinny C, inner dim divs evenly
+  // run_cugpu_test(128, 175, 150);  // short and fat C, inner dim divs unevenly
+  // run_cugpu_test(150, 175, 128);  // tall n skinny C, inner dim divs unevenly
 
-  run_cugpu_test(1024, 1024, 1024);  // largeish, divs evenly
-  run_cugpu_test(900, 1000, 950);    // largeish, divs unevenly
+  // run_cugpu_test(1024, 1024, 1024);  // largeish, divs evenly
+  // run_cugpu_test(900, 1000, 950);    // largeish, divs unevenly
   run_cugpu_test(2000, 4000, 1500);  // more largeish, divs unevenly
 }

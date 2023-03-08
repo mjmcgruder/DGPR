@@ -1456,10 +1456,10 @@ __global__ void cuda_residual_mass_multiply(custore store, real* R, real* f)
   }
 }
 
-#define TILE_SIZE 16
-
 __global__ void cuda_gemm(u32 m, u32 k, u32 n, real* A, real* B, real* C)
 {
+  const u32 TILE_SIZE = 32;
+
   __shared__ real tileA[TILE_SIZE][TILE_SIZE];
   __shared__ real tileB[TILE_SIZE][TILE_SIZE];
 
@@ -1468,19 +1468,19 @@ __global__ void cuda_gemm(u32 m, u32 k, u32 n, real* A, real* B, real* C)
   u32 rC = TILE_SIZE * blockIdx.y + rT;
   u32 cC = TILE_SIZE * blockIdx.x + cT;
 
-  real accC = 0.f;
+  real accC = 0.;
 
   for (u32 bk = 0; bk < (k + TILE_SIZE - 1) / TILE_SIZE; ++bk)
   {
     if ((rC) < m && (TILE_SIZE * bk + cT) < k)
       tileA[rT][cT] = A[k * (rC) + (TILE_SIZE * bk + cT)];
     else
-      tileA[rT][cT] = 0.f;
+      tileA[rT][cT] = 0.;
 
     if ((TILE_SIZE * bk + rT) < k && (cC) < n)
       tileB[rT][cT] = B[n * (TILE_SIZE * bk + rT) + (cC)];
     else
-      tileB[rT][cT] = 0.f;
+      tileB[rT][cT] = 0.;
 
     __syncthreads();
 
