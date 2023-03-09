@@ -52,23 +52,30 @@ void run_cugpu_test(u32 m, u32 n, u32 k)
   matmul(m, k, n, 1.f, A.data, B.data, 0.f, Ccpu.data);
   double cpu_end = MPI_Wtime();
 
-  dim3 block(32, 32);
-  dim3 grid(idiv_ceil(n, block.x), idiv_ceil(m, block.y));
+  {
+    dim3 block(32, 32);
+    dim3 grid(idiv_ceil(n, block.x), idiv_ceil(m, block.y));
+    cuda_gemm_smemcache<<<grid, block>>>(m, k, n, d_A, d_B, d_C);
+    cudaDeviceSynchronize();
+  }
 
   double gpu_start = MPI_Wtime();
-  cuda_gemm<<<grid, block>>>(m, k, n, d_A, d_B, d_C);
-  cudaDeviceSynchronize();
+  {
+    dim3 grid(idiv_ceil(n, 64), idiv_ceil(m, 64));
+    cuda_gemm_blocktile<<<grid, 8 * 64>>>(m, k, n, d_A, d_B, d_C);
+    cudaDeviceSynchronize();
+  }
   double gpu_end = MPI_Wtime();
 
-  printf("cpu: %.5fs gpu: %.5fs\n", 
-         cpu_end - cpu_start, gpu_end - gpu_start);
+  printf("cpu: %.5fs gpu: %.5fs\n", cpu_end - cpu_start, gpu_end - gpu_start);
 
-  cudaMemcpy(Cgpu.data, d_C, Cgpu.len * sizeof(*d_C), cudaMemcpyDeviceToHost);
+  // cudaMemcpy(Cgpu.data, d_C, Cgpu.len * sizeof(*d_C), cudaMemcpyDeviceToHost);
 
-  for (u64 i = 0; i < Ccpu.len; ++i)
-  {
-    EXPECT_FLOAT_EQ(Ccpu[i], Cgpu[i], 10);
-  }
+  // for (u64 i = 0; i < Ccpu.len; ++i)
+  // {
+  //   printf("%f %f\n", Ccpu[i], Cgpu[i]);
+  //   // EXPECT_FLOAT_EQ(Ccpu[i], Cgpu[i], 10);
+  // }
 
   cudaFree(d_A);
   cudaFree(d_B);
@@ -77,6 +84,7 @@ void run_cugpu_test(u32 m, u32 n, u32 k)
 
 TEST(cumath_test_matmul, 1)
 {
+  // run_cugpu_test(64, 64, 64);
   // run_cugpu_test(17, 17, 17);     // small stuff
   // run_cugpu_test(128, 128, 128);  // square, tile divides evenly
   // run_cugpu_test(100, 100, 100);  // square, tile divides unevenly

@@ -1456,7 +1456,8 @@ __global__ void cuda_residual_mass_multiply(custore store, real* R, real* f)
   }
 }
 
-__global__ void cuda_gemm(u32 m, u32 k, u32 n, real* A, real* B, real* C)
+__global__ void cuda_gemm_smemcache(u32 m, u32 k, u32 n, real* A, real* B,
+                                    real* C)
 {
   const u32 TILE_SIZE = 32;
 
@@ -1492,6 +1493,74 @@ __global__ void cuda_gemm(u32 m, u32 k, u32 n, real* A, real* B, real* C)
 
   if (rC < m && cC < n)
     C[n * rC + cC] = accC;
+}
+
+__global__ void cuda_gemm_blocktile(u32 m, u32 k, u32 n, real* A, real* B,
+                                    real* C)
+{
+  const u32 ntc = 64;  // num tile cols
+  const u32 ntr = 64;  // num tile rows
+  const u32 net = 8;   // num entries per thread (thread computes col)
+  const u32 nde = 8;   // num dot entries
+
+  __shared__ real tileA[ntr][nde];
+  __shared__ real tileB[nde][ntc];
+
+  // thread position in tile of C
+  u32 r_thread = threadIdx.x / ntc;
+  u32 c_thread = threadIdx.x % ntc;
+
+  // thread position for loading in tiles of A and B
+  u32 r_tileA = threadIdx.x / nde;
+  u32 c_tileA = threadIdx.x % nde;
+  u32 r_tileB = threadIdx.x / ntc;
+  u32 c_tileB = threadIdx.x % ntc;
+
+  real accC[net] = {};
+
+  u32 nbk = (k + nde - 1) / nde;
+  for (u32 ib = 0; ib < nbk; ++ib)
+  {
+    u32 rA = ntr * blockIdx.y + r_tileA;
+    u32 cA = nde * ib + c_tileA;
+
+    u32 rB = nde * ib + r_tileB;
+    u32 cB = ntc * blockIdx.x + c_tileB;
+
+    if (rA < m && cA < k)
+      tileA[r_tileA][c_tileA] = A[k * rA + cA];
+    else
+      tileA[r_tileA][c_tileA] = 0.;
+
+    if (rB < k && cB < n)
+      tileB[r_tileB][c_tileB] = B[n * rB + cB];
+    else
+      tileB[r_tileB][c_tileB] = 0.;
+
+    __syncthreads();
+
+    for (u32 id = 0; id < nde; ++id)
+    {
+      real tmp = tileB[id][c_thread];
+      for (u32 ie = 0; ie < net; ++ie)
+      {
+        accC[ie] += tileA[r_thread * net + ie][id] * tmp;
+      }
+    }
+
+    __syncthreads();
+  }
+
+  for (u32 ie = 0; ie < net; ++ie)
+  {
+    u32 rC = ntr * blockIdx.y + net * r_thread + ie;
+    u32 cC = ntc * blockIdx.x + c_thread;
+
+    if (rC < m && cC < n)
+    {
+      C[n * rC + cC] = accC[ie];
+    }
+  }
 }
 
 /* utilities ---------------------------------------------------------------- */
