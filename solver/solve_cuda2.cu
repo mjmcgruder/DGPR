@@ -1563,6 +1563,105 @@ __global__ void cuda_gemm_blocktile(u32 m, u32 k, u32 n, real* A, real* B,
   }
 }
 
+__global__ void cuda_gemm_blocktile2d(u32 m, u32 k, u32 n, real* A, real* B,
+                                      real* C)
+{
+  const u32 ntc  = 128;  // num tile cols
+  const u32 ntr  = 128;  // num tile rows
+  const u32 netc = 8;    // num row entries per thread
+  const u32 netr = 8;    // num col entries per thread
+  const u32 nde  = 8;    // num dot entries
+
+  __shared__ real tileA[ntr][nde];
+  __shared__ real tileB[nde][ntc];
+
+  u32 r_thread = threadIdx.x / (ntr / netr);
+  u32 c_thread = threadIdx.x % (ntr / netr);
+
+  u32 r_tileA = threadIdx.x / nde;
+  u32 c_tileA = threadIdx.x % nde;
+  u32 r_tileB = threadIdx.x / ntc;
+  u32 c_tileB = threadIdx.x % ntc;
+
+  real regA[netr];
+  real regB[netc];
+
+  real accC[netr][netc] = {};
+
+  u32 nbk = (k + nde - 1) / nde;
+  for (u32 ib = 0; ib < nbk; ++ib)
+  {
+    u32 rA = ntr * blockIdx.y + r_tileA;
+    u32 cA = nde * ib + c_tileA;
+
+    u32 rB = nde * ib + r_tileB;
+    u32 cB = ntc * blockIdx.x + c_tileB;
+
+    if (rA < m && cA < k)
+      tileA[r_tileA][c_tileA] = A[k * rA + cA];
+    else
+      tileA[r_tileA][c_tileA] = 0.;
+
+    if (rB < k && cB < n)
+      tileB[r_tileB][c_tileB] = B[n * rB + cB];
+    else
+      tileB[r_tileB][c_tileB] = 0.;
+
+    __syncthreads();
+
+    // printf("STUFF\n");
+    // if (threadIdx.x == 0 && blockIdx.x == 0 && blockIdx.y == 0)
+    // {
+    //   for (u32 ir = 0; ir < ntr; ++ir)
+    //   {
+    //     for (u32 ic = 0; ic < nde; ++ic)
+    //     {
+    //       printf("%f ", tileA[ir][ic]);
+    //     }
+    //     printf("\n");
+    //   }
+    //   printf("\n");
+    // }
+    // __syncthreads();
+
+    for (u32 id = 0; id < nde; ++id)
+    {
+      for (u32 i = 0; i < netr; ++i)
+      {
+        regA[i] = tileA[netr * r_thread + i][id];
+      }
+      for (u32 i = 0; i < netc; ++i)
+      {
+        regB[i] = tileB[id][netc * c_thread + i];
+      }
+
+      for (u32 ir = 0; ir < netr; ++ir)
+      {
+        for (u32 ic = 0; ic < netc; ++ic)
+        {
+          accC[ir][ic] += regA[ir] * regB[ic];
+        }
+      }
+    }
+
+    __syncthreads();
+  }
+
+  for (u32 ir = 0; ir < netr; ++ir)
+  {
+    for (u32 ic = 0; ic < netc; ++ic)
+    {
+      u32 rC = ntr * blockIdx.y + netr * r_thread + ir;
+      u32 cC = ntc * blockIdx.x + netc * c_thread + ic;
+
+      if (rC < m && cC < n)
+      {
+        C[n * rC + cC] = accC[ir][ic];
+      }
+    }
+  }
+}
+
 /* utilities ---------------------------------------------------------------- */
 
 __host__ u32 idiv_ceil(u32 a, u32 b)

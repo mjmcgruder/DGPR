@@ -52,18 +52,25 @@ void run_cugpu_test(u32 m, u32 n, u32 k)
   matmul(m, k, n, 1.f, A.data, B.data, 0.f, Ccpu.data);
   double cpu_end = MPI_Wtime();
 
-  {
-    dim3 block(32, 32);
-    dim3 grid(idiv_ceil(n, block.x), idiv_ceil(m, block.y));
-    cuda_gemm_smemcache<<<grid, block>>>(m, k, n, d_A, d_B, d_C);
-    cudaDeviceSynchronize();
-  }
+  // {
+  //   dim3 block(32, 32);
+  //   dim3 grid(idiv_ceil(n, block.x), idiv_ceil(m, block.y));
+  //   cuda_gemm_smemcache<<<grid, block>>>(m, k, n, d_A, d_B, d_C);
+  //   cudaDeviceSynchronize();
+  // }
+
+  // {
+  //   dim3 grid(idiv_ceil(n, 64), idiv_ceil(m, 64));
+  //   cuda_gemm_blocktile<<<grid, 8 * 64>>>(m, k, n, d_A, d_B, d_C);
+  //   cudaDeviceSynchronize();
+  // }
 
   double gpu_start = MPI_Wtime();
   {
-    dim3 grid(idiv_ceil(n, 64), idiv_ceil(m, 64));
-    cuda_gemm_blocktile<<<grid, 8 * 64>>>(m, k, n, d_A, d_B, d_C);
+    dim3 grid(idiv_ceil(n, 128), idiv_ceil(m, 128));
+    cuda_gemm_blocktile2d<<<grid, 8 * 128>>>(m, k, n, d_A, d_B, d_C);
     cudaDeviceSynchronize();
+    printf("%d %d\n", grid.x, grid.y);
   }
   double gpu_end = MPI_Wtime();
 
@@ -86,7 +93,7 @@ TEST(cumath_test_matmul, 1)
 {
   // run_cugpu_test(64, 64, 64);
   // run_cugpu_test(17, 17, 17);     // small stuff
-  // run_cugpu_test(128, 128, 128);  // square, tile divides evenly
+  run_cugpu_test(128, 128, 128);  // square, tile divides evenly
   // run_cugpu_test(100, 100, 100);  // square, tile divides unevenly
   // run_cugpu_test(128, 128, 150);  // short and fat C, inner dim divs evenly
   // run_cugpu_test(150, 128, 128);  // tall and skinny C, inner dim divs evenly
@@ -95,5 +102,5 @@ TEST(cumath_test_matmul, 1)
 
   // run_cugpu_test(1024, 1024, 1024);  // largeish, divs evenly
   // run_cugpu_test(900, 1000, 950);    // largeish, divs unevenly
-  run_cugpu_test(2000, 4000, 1500);  // more largeish, divs unevenly
+  // run_cugpu_test(2000, 4000, 1500);  // more largeish, divs unevenly
 }
