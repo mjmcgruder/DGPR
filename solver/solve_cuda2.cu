@@ -1578,51 +1578,39 @@ __global__ void cuda_gemm_blocktile2d(u32 m, u32 k, u32 n, real* A, real* B,
   u32 r_thread = threadIdx.x / (ntr / netr);
   u32 c_thread = threadIdx.x % (ntr / netr);
 
-  u32 r_tileA = threadIdx.x / nde;
-  u32 c_tileA = threadIdx.x % nde;
-  u32 r_tileB = threadIdx.x / ntc;
-  u32 c_tileB = threadIdx.x % ntc;
-
   real regA[netr];
   real regB[netc];
-
   real accC[netr][netc] = {};
 
   u32 nbk = (k + nde - 1) / nde;
   for (u32 ib = 0; ib < nbk; ++ib)
   {
-    u32 rA = ntr * blockIdx.y + r_tileA;
-    u32 cA = nde * ib + c_tileA;
+    for (u32 i = threadIdx.x; i < ntr * nde; i += blockDim.x)
+    {
+      u32 r_tileA = i / nde;
+      u32 c_tileA = i % nde;
 
-    u32 rB = nde * ib + r_tileB;
-    u32 cB = ntc * blockIdx.x + c_tileB;
+      u32 r_tileB = i / ntc;
+      u32 c_tileB = i % ntc;
 
-    if (rA < m && cA < k)
-      tileA[r_tileA][c_tileA] = A[k * rA + cA];
-    else
-      tileA[r_tileA][c_tileA] = 0.;
+      u32 rA = ntr * blockIdx.y + r_tileA;
+      u32 cA = nde * ib + c_tileA;
 
-    if (rB < k && cB < n)
-      tileB[r_tileB][c_tileB] = B[n * rB + cB];
-    else
-      tileB[r_tileB][c_tileB] = 0.;
+      u32 rB = nde * ib + r_tileB;
+      u32 cB = ntc * blockIdx.x + c_tileB;
+
+      if (rA < m && cA < k)
+        tileA[r_tileA][c_tileA] = A[k * rA + cA];
+      else
+        tileA[r_tileA][c_tileA] = 0.;
+
+      if (rB < k && cB < n)
+        tileB[r_tileB][c_tileB] = B[n * rB + cB];
+      else
+        tileB[r_tileB][c_tileB] = 0.;
+    }
 
     __syncthreads();
-
-    // printf("STUFF\n");
-    // if (threadIdx.x == 0 && blockIdx.x == 0 && blockIdx.y == 0)
-    // {
-    //   for (u32 ir = 0; ir < ntr; ++ir)
-    //   {
-    //     for (u32 ic = 0; ic < nde; ++ic)
-    //     {
-    //       printf("%f ", tileA[ir][ic]);
-    //     }
-    //     printf("\n");
-    //   }
-    //   printf("\n");
-    // }
-    // __syncthreads();
 
     for (u32 id = 0; id < nde; ++id)
     {
