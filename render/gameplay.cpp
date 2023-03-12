@@ -100,8 +100,6 @@ void game(list<entity>& scene_list, list<entity>& ui_list,
     metadata.compute_metadata_cpu(resolution, render_output, *render_state,
                                   gamma);
 
-    metadata.compute_metadata_gpu(resolution);
-
     recompute_state = false;
   }
 

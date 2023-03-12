@@ -56,6 +56,6 @@ int main(int argc, char** argv)
   /* exit */
 
   printf("\n");
-  clean();
+  clean_global_resources();
   return 0;
 }

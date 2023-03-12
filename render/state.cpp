@@ -181,7 +181,7 @@ void clean_swap_chain()
   delete[] swap_chain_image_views;
 }
 
-void clean()
+void clean_global_resources()
 {
   clean_swap_chain();
   vkDestroyCommandPool(device, graphics_command_pool, nullptr);
@@ -206,7 +206,7 @@ void clean_and_exit(const char* file, int line, ...)
   printf("error! (line %d of %s):\n", line, file);
   printf("  %s\n\n", message);
   // kill the fancy objects
-  clean();
+  clean_global_resources();
   // bail out
   exit(1);
 }

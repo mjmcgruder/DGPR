@@ -169,16 +169,10 @@ void make_render_pass(VkAttachmentLoadOp color_load_op,
 void make_graphics_pipeline(
 VkRenderPass render_pass,
 array<VkDescriptorSetLayout>& ubo_descriptor_set_layout,
-VkPipelineLayout& pipeline_layout, VkPipeline& graphics_pipeline)
+VkPipelineLayout& pipeline_layout, VkShaderModule vert_shader_module,
+VkShaderModule frag_shader_module, VkPipeline& graphics_pipeline)
 {
-  // shaders
-  u32 szvert, szfrag;
-  char* vert_shader_code = read_binary("graphics_vertex.spv", szvert);
-  char* frag_shader_code = read_binary("graphics_fragment.spv", szfrag);
-  VkShaderModule vert_shader_module =
-  make_shader_module(vert_shader_code, szvert);
-  VkShaderModule frag_shader_module =
-  make_shader_module(frag_shader_code, szfrag);
+  // shader stages
   VkPipelineShaderStageCreateInfo vert_create_info{};
   vert_create_info.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
   vert_create_info.stage  = VK_SHADER_STAGE_VERTEX_BIT;
@@ -189,8 +183,8 @@ VkPipelineLayout& pipeline_layout, VkPipeline& graphics_pipeline)
   frag_create_info.stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
   frag_create_info.module = frag_shader_module;
   frag_create_info.pName  = "main";
-  VkPipelineShaderStageCreateInfo stage_create_info[] = {vert_create_info,
-                                                         frag_create_info};
+  VkPipelineShaderStageCreateInfo shader_stage_create_info[] = {
+  vert_create_info, frag_create_info};
 
   // vertex input
   VkVertexInputAttributeDescription attribute_descriptions[3];
@@ -318,7 +312,7 @@ VkPipelineLayout& pipeline_layout, VkPipeline& graphics_pipeline)
   VkGraphicsPipelineCreateInfo pipeline_info{};
   pipeline_info.sType      = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
   pipeline_info.stageCount = 2;
-  pipeline_info.pStages    = stage_create_info;
+  pipeline_info.pStages    = shader_stage_create_info;
   pipeline_info.pVertexInputState   = &vertex_input_info;
   pipeline_info.pInputAssemblyState = &input_assembly_info;
   pipeline_info.pViewportState      = &viewport_state_info;
@@ -336,12 +330,6 @@ VkPipelineLayout& pipeline_layout, VkPipeline& graphics_pipeline)
   vkCreateGraphicsPipelines(
   device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &graphics_pipeline),
   "graphics pipeline creation failed!");
-
-  // cleanup
-  vkDestroyShaderModule(device, vert_shader_module, nullptr);
-  vkDestroyShaderModule(device, frag_shader_module, nullptr);
-  delete[] vert_shader_code;
-  delete[] frag_shader_code;
 }
 
 /*
@@ -538,6 +526,9 @@ struct graphics_pipeline
   VkPipeline pipeline;
   VkRenderPass render_pass;
 
+  VkShaderModule vert_shader_module;
+  VkShaderModule frag_shader_module;
+
   array<VkFramebuffer> framebuffers;
 
   VkPipelineLayout layout;
@@ -547,7 +538,7 @@ struct graphics_pipeline
 
   // ---
 
-  graphics_pipeline();
+  graphics_pipeline(string vertex_shader, string fragment_shader);
 
   graphics_pipeline(graphics_pipeline& oth)            = delete;
   graphics_pipeline& operator=(graphics_pipeline& oth) = delete;
@@ -559,26 +550,41 @@ struct graphics_pipeline
 
   // ---
 
-  void clean();
+  void clean_swapchain_dependencies();
   void update_swap_chain_dependencies(VkAttachmentLoadOp color_load_op);
 };
 
-graphics_pipeline::graphics_pipeline() :
+graphics_pipeline::graphics_pipeline(string vertex_shader,
+                                     string fragment_shader) :
 pipeline(VK_NULL_HANDLE),
 render_pass(VK_NULL_HANDLE),
+vert_shader_module(VK_NULL_HANDLE),
+frag_shader_module(VK_NULL_HANDLE),
 framebuffers(),
 layout(VK_NULL_HANDLE),
 scene_layout(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
              VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
 object_layout(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT)
-{}
+{
+  u32 szvert, szfrag;
+  char* vert_shader_code = read_binary(vertex_shader.c_str(), szvert);
+  char* frag_shader_code = read_binary(fragment_shader.c_str(), szfrag);
+
+  vert_shader_module = make_shader_module(vert_shader_code, szvert);
+  frag_shader_module = make_shader_module(frag_shader_code, szfrag);
+
+  delete[] vert_shader_code;
+  delete[] frag_shader_code;
+}
 
 graphics_pipeline::~graphics_pipeline()
 {
-  clean();
+  clean_swapchain_dependencies();
+  vkDestroyShaderModule(device, vert_shader_module, nullptr);
+  vkDestroyShaderModule(device, frag_shader_module, nullptr);
 }
 
-void graphics_pipeline::clean()
+void graphics_pipeline::clean_swapchain_dependencies()
 {
   for (u64 i = 0; i < framebuffers.len; ++i)
   {
@@ -592,13 +598,14 @@ void graphics_pipeline::clean()
 void graphics_pipeline::update_swap_chain_dependencies(
 VkAttachmentLoadOp color_load_op)
 {
-  clean();
+  clean_swapchain_dependencies();
 
   array<VkDescriptorSetLayout> layouts(2);
   layouts[0] = scene_layout.layout;
   layouts[1] = object_layout.layout;
   make_render_pass(color_load_op, render_pass);
-  make_graphics_pipeline(render_pass, layouts, layout, pipeline);
+  make_graphics_pipeline(render_pass, layouts, layout, vert_shader_module,
+                         frag_shader_module, pipeline);
 
   framebuffers = array<VkFramebuffer>(num_swap_chain_images);
   for (u64 i = 0; i < framebuffers.len; ++i)

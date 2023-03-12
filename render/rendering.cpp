@@ -339,8 +339,9 @@ void render_loop(core_geometry& geom, u64 time_step, real gamma,
   list<entity> scene_list;
   list<entity> ui_list;
 
-  graphics_pipeline scene_pipeline;
-  graphics_pipeline ui_pipeline;
+  graphics_pipeline scene_pipeline("graphics_vertex.spv",
+                                   "graphics_fragment.spv");
+  graphics_pipeline ui_pipeline("graphics_vertex.spv", "graphics_fragment.spv");
 
   make_swap_chain_dependencies(scene_pipeline, ui_pipeline);
 
